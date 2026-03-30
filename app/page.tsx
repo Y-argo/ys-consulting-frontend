@@ -1,0 +1,146 @@
+"use client";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { loginUser, registerUser } from "@/lib/api";
+
+export default function LoginPage() {
+  const router = useRouter();
+  const [mode, setMode] = useState<"login"|"register">("login");
+  const [uid, setUid] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    if (mode === "register" && password !== confirmPassword) {
+      setError("パスワードが一致しません"); return;
+    }
+    if (mode === "register" && password.length < 6) {
+      setError("パスワードは6文字以上で入力してください"); return;
+    }
+    setLoading(true);
+    try {
+      if (mode === "login") {
+        await loginUser(uid, password);
+      } else {
+        await registerUser(uid, password, displayName);
+      }
+      router.push("/chat");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "エラーが発生しました");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center p-4" style={{fontFamily:"'Inter','Noto Sans JP',sans-serif"}}>
+      {/* 背景グラデーション */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-40 -left-40 w-96 h-96 bg-blue-900/20 rounded-full blur-3xl"/>
+        <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-indigo-900/20 rounded-full blur-3xl"/>
+      </div>
+
+      <div className="w-full max-w-md relative">
+        {/* ロゴ */}
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl shadow-2xl shadow-blue-900/50 mb-4">
+            <span className="text-white font-black text-2xl">A</span>
+          </div>
+          <h1 className="text-3xl font-black text-white tracking-widest">ASCEND</h1>
+          <p className="text-gray-500 text-sm mt-1">Ys Consulting Office</p>
+          <p className="text-gray-600 text-xs mt-1">自己変容を通じて、意思決定精度を高めるトレーニング領域。</p>
+        </div>
+
+        {/* タブ */}
+        <div className="flex bg-[#1a1a2e] border border-[#2a2a4a] rounded-2xl p-1 mb-4">
+          <button
+            onClick={()=>{setMode("login");setError("");}}
+            className={"flex-1 py-2 text-sm font-medium rounded-xl transition-all "+(mode==="login"?"bg-blue-600 text-white shadow-lg":"text-gray-500 hover:text-gray-300")}
+          >ログイン</button>
+          <button
+            onClick={()=>{setMode("register");setError("");}}
+            className={"flex-1 py-2 text-sm font-medium rounded-xl transition-all "+(mode==="register"?"bg-blue-600 text-white shadow-lg":"text-gray-500 hover:text-gray-300")}
+          >新規登録</button>
+        </div>
+
+        {/* フォーム */}
+        <div className="bg-[#0d0d14] border border-[#2a2a4a] rounded-2xl p-6 shadow-2xl">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {mode === "register" && (
+              <div>
+                <label className="block text-xs text-gray-500 mb-1.5 font-medium">表示名（任意）</label>
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={e=>setDisplayName(e.target.value)}
+                  className="w-full bg-[#1a1a2e] text-white border border-[#2a2a4a] focus:border-blue-600 rounded-xl px-4 py-2.5 text-sm focus:outline-none transition-colors"
+                  placeholder="表示名"
+                />
+              </div>
+            )}
+            <div>
+              <label className="block text-xs text-gray-500 mb-1.5 font-medium">ユーザーID</label>
+              <input
+                type="text"
+                value={uid}
+                onChange={e=>setUid(e.target.value)}
+                required
+                autoFocus
+                className="w-full bg-[#1a1a2e] text-white border border-[#2a2a4a] focus:border-blue-600 rounded-xl px-4 py-2.5 text-sm focus:outline-none transition-colors"
+                placeholder="UID"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1.5 font-medium">パスワード{mode==="register"&&"（6文字以上）"}</label>
+              <input
+                type="password"
+                value={password}
+                onChange={e=>setPassword(e.target.value)}
+                required
+                className="w-full bg-[#1a1a2e] text-white border border-[#2a2a4a] focus:border-blue-600 rounded-xl px-4 py-2.5 text-sm focus:outline-none transition-colors"
+                placeholder="Password"
+              />
+            </div>
+            {mode === "register" && (
+              <div>
+                <label className="block text-xs text-gray-500 mb-1.5 font-medium">パスワード（確認）</label>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={e=>setConfirmPassword(e.target.value)}
+                  required
+                  className="w-full bg-[#1a1a2e] text-white border border-[#2a2a4a] focus:border-blue-600 rounded-xl px-4 py-2.5 text-sm focus:outline-none transition-colors"
+                  placeholder="Confirm Password"
+                />
+              </div>
+            )}
+
+            {error && (
+              <div className="bg-red-900/20 border border-red-800/50 rounded-xl px-4 py-2.5">
+                <p className="text-red-400 text-xs">{error}</p>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-gray-700 disabled:to-gray-700 disabled:text-gray-500 text-white font-bold rounded-xl py-3 text-sm transition-all shadow-lg shadow-blue-900/30 mt-2"
+            >
+              {loading ? "処理中..." : mode==="login" ? "ログイン" : "アカウントを作成"}
+            </button>
+          </form>
+        </div>
+
+        {/* フッター */}
+        <p className="text-center text-xs text-gray-700 mt-6">
+          ※ 本AIの出力は意思決定支援のための提案です。投資・法務・医療等の重要事項は専門家にご確認ください。
+        </p>
+      </div>
+    </div>
+  );
+}
