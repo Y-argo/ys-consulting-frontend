@@ -24,7 +24,7 @@ interface MsgExt extends Message {
   tableResult?: TableResult;
 }
 
-const BASE_C = {
+const C = {
   bg: "#f8f9fc",
   card: "#ffffff",
   nav: "rgba(255,255,255,0.95)",
@@ -60,12 +60,15 @@ export default function ChatPage() {
   const [renameVal, setRenameVal] = useState("");
   const [fcData, setFcData] = useState<{report:Record<string,unknown>|null;use_count_since_report:number}>({report:null,use_count_since_report:0});
   const [headerCfg, setHeaderCfg] = useState<Record<string,string>>({});
-  const [leftOpen, setLeftOpen] = useState(true);
+  const [leftOpen, setLeftOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeConfig|null>(null);
   const [editingId, setEditingId] = useState<string|null>(null);
+  const [scoreDelta, setScoreDelta] = useState<number|null>(null);
   const [editVal, setEditVal] = useState("");
   const [attachment, setAttachment] = useState<AttachmentResult|null>(null);
   const [attachLoading, setAttachLoading] = useState(false);
+  const [feedbackToast, setFeedbackToast] = useState<string>("");
+  const [loadingStep, setLoadingStep] = useState(0);
   const [showInputExample, setShowInputExample] = useState(false);
   const [chatExamples, setChatExamples] = useState<string[]>([]);
   const [purposeModesData, setPurposeModesData] = useState<{id:string;label:string}[]>([]);
@@ -73,32 +76,76 @@ export default function ChatPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const C = {
-    ...BASE_C,
-    primary: theme?.color_primary || BASE_C.primary,
-    primary2: theme?.color_secondary || BASE_C.primary2,
-  };
-
   useEffect(() => {
+    setLeftOpen(window.innerWidth >= 768);
     const user = getStoredUser();
     if (!user) { router.push("/"); return; }
     setUid(user.uid);
-    fetchSessions();
-    fetchHistory("main");
-    getMyFeatures().then(f => { setUltraEnabled(!!f.ascend_ultra); setApexEnabled(!!f.ascend_apex); });
+    listSessions().then(s => {
+      if (s.length > 0) {
+        setSessions(s);
+        fetchHistory(s[0].chat_id);
+      } else {
+        newSession().then(id => {
+          setSessions([{chat_id:id, title:"新しいチャット"}]);
+          setChatId(id);
+        });
+      }
+    });
+    getMyFeatures().then(f => {
+      const hasUltra = !!f.ascend_ultra;
+      const hasApex = !!f.ascend_apex;
+      setUltraEnabled(hasUltra);
+      setApexEnabled(hasApex);
+      const savedTier = localStorage.getItem("ascend_ai_tier_default");
+      if (savedTier === "ultra" && hasUltra) setAiTier("ultra");
+      else if (savedTier === "apex" && hasApex) setAiTier("apex");
+      else setAiTier("core");
+    });
     getUserStats().then(setStats);
     getHeaderConfig().then(setHeaderCfg);
     getFcReport().then(setFcData);
-    getTheme().then(setTheme);
+    getTheme().then(t => {
+      setTheme(t);
+      if (!t) return;
+      // favicon
+      if (t.favicon_url) {
+        let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
+        if (!link) { link = document.createElement("link"); link.rel = "icon"; document.head.appendChild(link); }
+        link.href = t.favicon_url;
+      }
+    });
     getChatExamples().then(setChatExamples);
     getPurposeModes().then(setPurposeModesData);
+
+    // セッションタイムアウト監視
+    let _timeoutMin = 60;
+    fetch("/api/user/session_timeout", {headers:{"Authorization":`Bearer ${localStorage.getItem("ascend_token")||""}`}})
+      .then(r=>r.json()).then(d=>{ _timeoutMin = d.session_timeout_minutes||60; }).catch(()=>{});
+    const _lastAct = {ts: Date.now()};
+    const _updateAct = () => { _lastAct.ts = Date.now(); };
+    window.addEventListener("mousemove", _updateAct);
+    window.addEventListener("keydown", _updateAct);
+    window.addEventListener("click", _updateAct);
+    const _timer = setInterval(() => {
+      if (Date.now() - _lastAct.ts > _timeoutMin * 60 * 1000) {
+        logout();
+        router.push("/");
+      }
+    }, 30000);
+    return () => {
+      clearInterval(_timer);
+      window.removeEventListener("mousemove", _updateAct);
+      window.removeEventListener("keydown", _updateAct);
+      window.removeEventListener("click", _updateAct);
+    };
   }, []);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({behavior:"smooth"}); }, [messages]);
 
   async function fetchSessions() {
     const s = await listSessions();
-    setSessions(s.length > 0 ? s : [{chat_id:"main",title:"メインチャット"}]);
+    setSessions(s);
   }
   async function fetchHistory(cid: string) {
     const h = await loadHistory(cid);
@@ -110,79 +157,7 @@ export default function ChatPage() {
     ? purposeModesData.map(m=>({id:m.id, desc:m.label}))
     : [{id:"AUTO",desc:"自動"},{id:"NUMERIC",desc:"数字"},{id:"GROWTH",desc:"成長"},{id:"CONTROL",desc:"構造"},{id:"CREATIVE",desc:"創造"},{id:"MARKETING",desc:"集客"}];
 
-  const inputExamples = chatExamples.length > 0 ? chatExamples : [
-    "【目的】新規指名を月10件増やす\n【現状】月100本・新規10前後\n【制約】1日3時間・SNS運用中\n【出力】戦略と優先アクション3件",
-    "【目的】リピート率を80%以上にする\n【現状】現在60%・接客60分\n【制約】価格変更不可\n【出力】具体的施策と計測指標",
-    "【目的】競合との差別化を明確化\n【現状】同エリアに5店舗競合\n【制約】宣材写真3枚のみ\n【出力】差別化軸と訴求文案",
-  ];
-
-  function renderAssistantImages(images?: {mime_type:string; data:string}[]) {
-    if (!images || images.length === 0) return null;
-    return (
-      <div className="mt-3 space-y-2">
-        {images.map((img, ii) => (
-          <div key={ii}>
-            <img src={`data:${img.mime_type};base64,${img.data}`} alt={`generated_${ii+1}`} className="max-w-full rounded-xl" style={{maxHeight:"400px",objectFit:"contain",border:`1px solid ${C.border}`}}/>
-            <a href={`data:${img.mime_type};base64,${img.data}`} download={`image_${ii+1}.png`}
-              style={{background:"rgba(79,70,229,0.08)",border:`1px solid ${C.borderPrimary}`,borderRadius:"8px",color:C.primary}}
-              className="inline-block mt-1 text-xs px-3 py-1 hover:text-indigo-700">📥 画像を保存</a>
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  function renderAssistantTable(tableResult?: TableResult) {
-    if (!tableResult || !tableResult.columns || tableResult.columns.length === 0) return null;
-    return (
-      <div className="mt-3">
-        <div style={{overflowX:"auto"}}>
-          <table style={{borderCollapse:"collapse",width:"100%",fontSize:"11px"}}>
-            <thead>
-              <tr>{tableResult.columns.map((c,ci)=>(
-                <th key={ci} style={{border:`1px solid ${C.border}`,padding:"4px 8px",background:"rgba(79,70,229,0.06)",color:C.primary,whiteSpace:"nowrap"}}>{c}</th>
-              ))}</tr>
-            </thead>
-            <tbody>
-              {(tableResult.rows||[]).slice(0,50).map((row,ri)=>(
-                <tr key={ri}>{(row as unknown[]).map((cell,ci)=>(
-                  <td key={ci} style={{border:`1px solid ${C.border}`,padding:"3px 8px",color:C.textMain}}>{String(cell??'')}</td>
-                ))}</tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {tableResult.csv && (
-          <div className="flex gap-2 mt-2 flex-wrap">
-            <a href={`data:text/csv;charset=utf-8,${encodeURIComponent(tableResult.csv)}`} download="table.csv"
-              style={{background:"rgba(16,185,129,0.08)",border:"1px solid rgba(16,185,129,0.3)",borderRadius:"8px",color:"#059669"}}
-              className="text-xs px-3 py-1 hover:text-green-700">📥 CSV保存</a>
-            {["/rank","/filter","/derive","/top","/consult"].map(cmd=>(
-              <button key={cmd} onClick={()=>setInput(cmd+" ")}
-                style={{background:"rgba(79,70,229,0.06)",border:`1px solid ${C.borderPrimary}`,borderRadius:"8px",color:C.primary}}
-                className="text-xs px-2 py-1 hover:text-indigo-700">{cmd}</button>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  function renderAssistantSuggestions(suggestions?: string[]) {
-    if (!suggestions || suggestions.length === 0) return null;
-    return (
-      <div className="ml-11 mt-2 space-y-1.5">
-        <p className="text-xs mb-1.5" style={{color:C.primary}}>💡 次に想定される事案</p>
-        {suggestions.map((q,qi)=>(
-          <button key={qi} onClick={()=>setInput(q)}
-            style={{background:C.card, border:`1px solid ${C.borderPrimary}`, borderRadius:"12px", boxShadow:C.shadow, color:C.textSub}}
-            className="w-full text-left text-xs px-4 py-2.5 transition-all hover:border-indigo-400 hover:text-indigo-600 block">
-            {q}
-          </button>
-        ))}
-      </div>
-    );
-  }
+  const inputExamples = chatExamples;
 
   async function handleSend(e: React.FormEvent, overrideText?: string) {
     e.preventDefault();
@@ -201,15 +176,30 @@ export default function ChatPage() {
     setAttachment(null);
     setMessages(p=>[...p, userMsg]);
     setLoading(true);
+    setLoadingStep(0);
+    const _stepTimer = setInterval(()=>setLoadingStep(s=>Math.min(s+1,5)),1200);
     try {
-      const sendText = attachment
-        ? `${text}\n\n【添付ファイル: ${attachment.filename}】\n${attachment.extracted_text.slice(0,2000)}`
-        : text;
-      const res = await sendMessage(sendText, chatId, aiTier);
+      const sendText = text;
+      const _isFileReq2 = !!attachment;
+      const _isImageReq2 = /画像|イメージ|イラスト|ロゴ|アイコン|バナー|生成して|描いて|作って/i.test(sendText) && !/解析|分析|読んで/.test(sendText);
+      const _isInvestReq2 = /投資|銘柄|株|相場|シグナル|GOAL_BOTTOM|WATCH|底打ち|反発|買い|売り/i.test(sendText);
+      let res;
+      if (_isFileReq2 && attachment) {
+        const { sendFileMessage } = await import("@/lib/api");
+        res = await sendFileMessage(sendText, chatId, aiTier, attachment.extracted_text||"", attachment.filename||"");
+      } else if (_isImageReq2) {
+        const { sendImageMessage } = await import("@/lib/api");
+        res = await sendImageMessage(sendText, chatId, aiTier);
+      } else if (_isInvestReq2) {
+        const { sendInvestMessage } = await import("@/lib/api");
+        res = await sendInvestMessage(sendText, chatId, aiTier);
+      } else {
+        res = await sendMessage(sendText, chatId, aiTier, purposeMode);
+      }
       const cases = res.cases||[];
       const images = res.images||[];
       setMessages(p=>[...p, {id:`a_${Date.now()}`, role:"assistant", content:res.reply, feedback:null, suggestions:cases, images}]);
-      getUserStats().then(setStats);
+      getUserStats().then(s=>{ setStats(s); if(s?.level_last_delta && s.level_last_delta!==0){ setScoreDelta(s.level_last_delta); setTimeout(()=>setScoreDelta(null),2500); } });
       getFcReport().then(setFcData);
     } catch(err:unknown) {
       const msg = err instanceof Error ? err.message : "エラー";
@@ -241,6 +231,8 @@ export default function ChatPage() {
 
   async function handleFeedback(msgId: string, label: "good"|"bad", msgContent: string) {
     setMessages(p=>p.map(m=>m.id===msgId?{...m, feedback:label}:m));
+    setFeedbackToast(label==="good" ? "👍 役立ったとして記録しました" : "💡 改善余地ありとして記録しました");
+    setTimeout(()=>setFeedbackToast(""), 2500);
     const userMsg = messages.slice(0, messages.findIndex(m=>m.id===msgId)).reverse().find(m=>m.role==="user");
     await saveFeedback(chatId, userMsg?.content||"", msgContent, label);
   }
@@ -255,11 +247,30 @@ export default function ChatPage() {
   }
 
   async function handleNewSession() {
-    const cid = await newSession(); await fetchSessions(); await fetchHistory(cid);
+    const cid = await newSession();
+    await new Promise(r => setTimeout(r, 600));
+    await fetchSessions();
+    await fetchHistory(cid);
   }
   async function handleDelete() {
     if (!confirm("このチャットを削除しますか？")) return;
-    await deleteSession(chatId); await fetchSessions(); await fetchHistory("main");
+    const deletedId = chatId;
+    setMessages([]);
+    await deleteSession(deletedId);
+    await new Promise(r => setTimeout(r, 800));
+    const s = await listSessions();
+    const next = s.filter(x => x.chat_id !== deletedId);
+    if (next.length > 0) {
+      setSessions(next);
+      setChatId(next[0].chat_id);
+      const h = await loadHistory(next[0].chat_id);
+      setMessages(h.map((m,i)=>({...m, id:`hist_${i}_${Date.now()}`, suggestions: m.cases||[]})));
+    } else {
+      const newId = await newSession();
+      setSessions([{chat_id:newId, title:"新しいチャット"}]);
+      setChatId(newId);
+      setMessages([]);
+    }
   }
   async function handleRename() {
     if (!renameVal.trim()) return;
@@ -287,23 +298,28 @@ export default function ChatPage() {
   return (
     <div className="flex flex-col h-screen overflow-hidden" style={{background:C.bg, fontFamily:"'Inter','Noto Sans JP',sans-serif", color:C.textMain}}>
       {/* NAV */}
-      <nav style={{background:C.nav, borderBottom:`1px solid ${C.border}`, backdropFilter:"blur(12px)", boxShadow:C.shadow}} className="flex items-center justify-between px-5 py-2.5 flex-shrink-0 z-10">
-        <div className="flex items-center gap-3">
-          <button onClick={()=>setLeftOpen(!leftOpen)} style={{color:C.textMuted}} className="hover:text-gray-600 transition-colors text-lg">☰</button>
-          <div className="flex items-center gap-2.5">
+      <nav style={{background:C.nav, borderBottom:`1px solid ${C.border}`, backdropFilter:"blur(12px)", boxShadow:C.shadow}} className="flex-shrink-0 z-10">
+        {/* 1行目: ASCEND（左）サブタイトル（中央）☰（右） */}
+        <div className="flex items-center px-4 py-2 gap-2">
+          <div className="flex items-center gap-2 flex-shrink-0">
             {theme?.logo_url ? (
               <img src={theme.logo_url} style={{height:`${theme.logo_size||32}px`,maxWidth:"120px",objectFit:"contain"}} alt="logo"/>
             ) : (
-              <div style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`, boxShadow:C.shadowPrimary}} className="w-7 h-7 rounded-lg flex items-center justify-center">
+              <div style={{background:`linear-gradient(135deg,${theme?.color_primary||C.primary},${C.primary2})`,boxShadow:C.shadowPrimary}} className="w-7 h-7 rounded-lg flex items-center justify-center">
                 <span className="text-white font-black text-xs">A</span>
               </div>
             )}
-            <span className="font-black text-sm tracking-widest" style={{color:C.textMain}}>ASCEND</span>
-            <span style={{color:C.textMuted}} className="text-xs hidden sm:inline">｜{headerCfg.subtitle||"Ys Consulting Office"}</span>
+            <span className="font-black text-sm tracking-widest" style={{color:theme?.color_text_main||C.textMain}}>ASCEND</span>
           </div>
+          <div className="flex-1 text-center">
+            {headerCfg.subtitle && <span style={{color:C.primary,fontSize:"11px",fontWeight:600}}>{headerCfg.subtitle}</span>}
+          </div>
+          <button onClick={()=>setLeftOpen(!leftOpen)}
+            style={{background:C.primary,color:"white",borderRadius:"10px",padding:"5px 12px",fontSize:"16px",border:"none",cursor:"pointer",flexShrink:0}}>☰</button>
         </div>
-        <div className="flex items-center gap-2">
-          <div style={{background:"rgba(79,70,229,0.08)",border:`1px solid ${C.borderPrimary}`,borderRadius:"12px"}} className="px-2 py-1 flex items-center gap-1" title="AIエンジン選択: Core=標準 / Ultra=高精度 / Apex=最上位">
+        {/* 2行目: AIエンジン + ユーザー 右寄せ */}
+        <div className="flex items-center gap-2 px-4 pb-2 justify-end">
+          <div style={{background:"rgba(79,70,229,0.08)",border:`1px solid ${C.borderPrimary}`,borderRadius:"10px"}} className="px-2 py-1 flex items-center gap-1">
             <span className="text-xs" style={{color:C.primary}}>⚡</span>
             <select value={aiTier} onChange={e=>setAiTier(e.target.value)} style={{background:"transparent",color:C.primary}} className="text-xs focus:outline-none cursor-pointer">
               <option value="core" style={{background:"#fff",color:"#111"}}>Core（標準）</option>
@@ -311,34 +327,74 @@ export default function ChatPage() {
               {apexEnabled  && <option value="apex"  style={{background:"#fff",color:"#111"}}>Apex（最上位）</option>}
             </select>
           </div>
-          <button onClick={()=>openModal("mypage")} style={{background:"rgba(0,0,0,0.04)",border:`1px solid ${C.border}`,borderRadius:"12px"}} className="text-xs px-3 py-1.5 transition-all hover:bg-black/8">
-            👤 {uid}
+          <button onClick={()=>router.push("/mypage")} style={{background:`linear-gradient(135deg,rgba(79,70,229,0.1),rgba(124,58,237,0.1))`,border:`1px solid ${C.borderPrimary}`,borderRadius:"10px",color:C.primary,display:"flex",alignItems:"center",gap:"4px",padding:"4px 8px 4px 4px"}} className="transition-all hover:opacity-80">
+            <div style={{width:"20px",height:"20px",borderRadius:"50%",background:`linear-gradient(135deg,${C.primary},${C.primary2})`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+              <span className="text-white font-black text-xs">{uid.charAt(0).toUpperCase()}</span>
+            </div>
+            <span className="font-bold text-xs">{uid}</span>
           </button>
-          <button onClick={()=>router.push("/mypage")} style={{background:`rgba(79,70,229,0.08)`,border:`1px solid ${C.borderPrimary}`,borderRadius:"12px",color:C.primary}} className="text-xs px-3 py-1.5 transition-all hover:bg-indigo-50">マイページ</button>
         </div>
       </nav>
 
       <div className="flex flex-1 overflow-hidden">
+
         {/* LEFT SIDEBAR */}
         {leftOpen && (
           <aside style={{background:C.sidebar, borderRight:`1px solid ${C.border}`, width:"220px"}} className="flex-shrink-0 flex flex-col overflow-y-auto">
             <div className="p-3 space-y-2">
-              {/* ロゴ */}
-              {theme?.logo_url && (
-                <div className="flex justify-center pt-1 pb-2">
-                  <img src={theme.logo_url} style={{height:`${theme.logo_size||36}px`,maxWidth:"140px",objectFit:"contain"}} alt="logo"/>
-                </div>
-              )}
-              {/* ランクスコア */}
-              {stats && (
-                <div style={{background:C.card, border:`1px solid ${C.borderPrimary}`, borderRadius:"12px", boxShadow:C.shadow}} className="p-3">
-                  <div className="flex justify-between items-center">
-                    <span style={{color:C.primary}} className="text-xs font-bold">{stats.rank_name}</span>
-                    <span style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`, borderRadius:"8px", padding:"2px 8px"}} className="text-xs font-black text-white">{stats.level_score} pt</span>
+              {/* サイドバータイトル */}
+              <div className="flex items-center gap-2 pt-1 pb-2 px-1">
+                <span style={{color:C.primary,fontWeight:900,fontSize:"13px",letterSpacing:"0.01em"}}>Ys Consulting Office</span>
+              </div>
+              {/* ランクスコア プレミアム */}
+              {stats && (() => {
+                const rankColors: Record<string,{bg:string,border:string,text:string,badge:string}> = {
+                  default:{bg:"linear-gradient(135deg,#f8f9fc,#f1f2f6)",border:"rgba(0,0,0,0.1)",text:"#374151",badge:"linear-gradient(135deg,#6b7280,#9ca3af)"},
+                };
+                const rc = rankColors[stats.rank_name] || rankColors.default;
+                const rankOrder = stats.rank_cfg ? [stats.rank_cfg.rank_1_name,stats.rank_cfg.rank_2_name,stats.rank_cfg.rank_3_name,stats.rank_cfg.rank_4_name] : [];
+                const rankGradients = [
+                  "linear-gradient(135deg,#9ca3af,#6b7280)",
+                  "linear-gradient(135deg,#3b82f6,#2563eb)",
+                  "linear-gradient(135deg,#f59e0b,#d97706)",
+                  "linear-gradient(135deg,#8b5cf6,#6d28d9)",
+                ];
+                const curIdx = rankOrder.indexOf(stats.rank_name);
+                const badgeGrad = rankGradients[curIdx] || rankGradients[0];
+                const maxScore = [80,200,450,9999][Math.min(curIdx+1,3)];
+                const minScore = [0,80,200,450][Math.max(curIdx,0)];
+                const pct = Math.min(((stats.level_score-minScore)/Math.max(maxScore-minScore,1))*100,100);
+                return (
+                  <div style={{background:"linear-gradient(135deg,#fff,#f8f4ff)",border:`1px solid rgba(79,70,229,0.2)`,borderRadius:"14px",boxShadow:"0 2px 12px rgba(79,70,229,0.08)",overflow:"hidden"}} className="p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <div className="text-xs font-bold" style={{color:"#6b7280",letterSpacing:"0.08em"}}>RANK STATUS</div>
+                        <div className="font-black text-base mt-0.5" style={{background:badgeGrad,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>{stats.rank_name}</div>
+                      </div>
+                      <div style={{background:badgeGrad,borderRadius:"10px",padding:"4px 10px",boxShadow:"0 2px 8px rgba(79,70,229,0.2)"}}>
+                        <span className="text-white font-black text-sm">{stats.level_score.toLocaleString()}</span>
+                        <span className="text-white text-xs ml-0.5 opacity-80">pt</span>
+                        {scoreDelta!==null && <span style={{background:"rgba(255,255,255,0.25)",borderRadius:"6px",padding:"1px 5px",fontSize:"10px",fontWeight:900,marginLeft:"4px",animation:"fadeIn 0.3s"}}>{scoreDelta>0?"+":""}{scoreDelta}</span>}
+                      </div>
+                    </div>
+                    {/* ランク進捗バー */}
+                    <div style={{background:"rgba(0,0,0,0.06)",borderRadius:"99px",height:"4px",margin:"6px 0"}}>
+                      <div style={{width:`${pct}%`,background:badgeGrad,borderRadius:"99px",height:"4px",transition:"width 0.6s ease"}}/>
+                    </div>
+                    <div className="text-xs" style={{color:"#9ca3af"}}>Next: {stats.next_pt}</div>
+                    {/* ランク段階表示 */}
+                    {rankOrder.length>0 && (
+                      <div className="flex gap-1 mt-2">
+                        {rankOrder.map((r,i)=>(
+                          <div key={r} style={{flex:1,padding:"3px 0",textAlign:"center",background:r===stats.rank_name?rankGradients[i]:"rgba(0,0,0,0.04)",borderRadius:"6px",transition:"all 0.2s"}}>
+                            <span style={{fontSize:"9px",fontWeight:r===stats.rank_name?"800":"500",color:r===stats.rank_name?"#fff":"#9ca3af"}}>{r}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <p className="text-xs mt-0.5" style={{color:C.textMuted}}>Next: {stats.next_pt}</p>
-                </div>
-              )}
+                );
+              })()}
               <button onClick={handleNewSession} style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`, boxShadow:C.shadowPrimary}} className="w-full text-xs font-bold text-white rounded-xl py-2.5 hover:opacity-90 transition-all">
                 ＋ 新しいチャット
               </button>
@@ -356,38 +412,57 @@ export default function ChatPage() {
                 </button>
               ))}
             </div>
-
-            {/* Decision Metrics */}
-            {dm && (
-              <div className="px-2 pb-2">
-                <div style={{background:C.card, border:`1px solid ${C.borderPrimary}`, borderRadius:"12px", boxShadow:C.shadow}} className="p-3">
-                  <div className="flex justify-between items-center mb-2">
-                    <span style={{color:C.primary}} className="text-xs font-bold">DECISION METRICS</span>
-                    <span style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`, padding:"1px 7px", borderRadius:"20px"}} className="text-xs font-black text-white">{String(dm.diagnosis_rank||"C")}</span>
-                  </div>
-                  <div className="space-y-1.5 mb-2">
-                    {([["Q",dm.decision_quality_score],["R",dm.risk_tolerance],["S",dm.structural_intelligence],["V",dm.decision_velocity],["P",dm.prediction_accuracy],["E",dm.execution_consistency]] as [string,unknown][]).map(([l,v])=>(
-                      <div key={String(l)}>
-                        <div className="flex justify-between text-xs mb-0.5">
-                          <span style={{color:C.textSub}}>{String(l)}</span>
-                          <span style={{color:C.textMain}} className="font-bold">{Number(v||0).toFixed(0)}</span>
-                        </div>
-                        <div style={{background:"rgba(0,0,0,0.07)",borderRadius:"99px",height:"3px"}}>
-                          <div style={{width:`${Math.min(Number(v||0),100)}%`,background:`linear-gradient(90deg,${C.primary},${C.primary2})`,borderRadius:"99px",height:"3px"}}/>
-                        </div>
+            {dm && (() => {
+              const rank = String(dm.diagnosis_rank||"C");
+              const rankGrad = rank==="S"?"linear-gradient(135deg,#f59e0b,#ef4444)":rank.startsWith("A")?"linear-gradient(135deg,#6366f1,#8b5cf6)":rank.startsWith("B")?"linear-gradient(135deg,#3b82f6,#06b6d4)":"linear-gradient(135deg,#6b7280,#9ca3af)";
+              const dims = [
+                {key:"Q",label:String(dm.label_q||"Q 意思決定精度"),val:Number(dm.decision_quality_score||0)},
+                {key:"R",label:String(dm.label_r||"R リスク耐性"),val:Number(dm.risk_tolerance||0)},
+                {key:"S",label:String(dm.label_s||"S 構造理解"),val:Number(dm.structural_intelligence||0)},
+                {key:"V",label:String(dm.label_v||"V 判断速度"),val:Number(dm.decision_velocity||0)},
+                {key:"P",label:String(dm.label_p||"P 予測精度"),val:Number(dm.prediction_accuracy||0)},
+                {key:"E",label:String(dm.label_e||"E 実行一貫性"),val:Number(dm.execution_consistency||0)},
+              ];
+              const barColor = (v:number) => v>=80?"#6366f1":v>=65?"#3b82f6":v>=50?"#f59e0b":"#9ca3af";
+              return (
+                <div className="px-2 pb-2">
+                  <div style={{background:"linear-gradient(135deg,#0f0c29,#302b63,#24243e)",borderRadius:"14px",boxShadow:"0 4px 20px rgba(99,102,241,0.25)",overflow:"hidden"}} className="p-3">
+                    {/* ヘッダー */}
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <div style={{color:"rgba(255,255,255,0.5)",fontSize:"9px",letterSpacing:"0.15em",fontWeight:700}}>DIMENSION MATRIX</div>
+                        <div style={{color:"rgba(255,255,255,0.9)",fontSize:"11px",fontWeight:800,marginTop:"1px"}}>意思決定精度診断</div>
                       </div>
-                    ))}
+                      <div style={{background:rankGrad,borderRadius:"10px",padding:"4px 10px",boxShadow:"0 0 12px rgba(99,102,241,0.4)"}}>
+                        <span style={{color:"white",fontWeight:900,fontSize:"14px"}}>{rank}</span>
+                      </div>
+                    </div>
+                    {/* 6指標 */}
+                    <div className="space-y-2 mb-3">
+                      {dims.map(d=>(
+                        <div key={d.key}>
+                          <div className="flex justify-between items-center mb-0.5">
+                            <span style={{color:"rgba(255,255,255,0.6)",fontSize:"10px",fontWeight:600}}>{d.key}</span>
+                            <span style={{color:"white",fontSize:"10px",fontWeight:700}}>{d.val.toFixed(0)}</span>
+                          </div>
+                          <div style={{background:"rgba(255,255,255,0.1)",borderRadius:"99px",height:"3px"}}>
+                            <div style={{width:`${Math.min(d.val,100)}%`,background:barColor(d.val),borderRadius:"99px",height:"3px",transition:"width 0.6s ease",boxShadow:`0 0 6px ${barColor(d.val)}`}}/>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {/* TOTAL */}
+                    <div style={{borderTop:"1px solid rgba(255,255,255,0.1)",paddingTop:"8px"}} className="flex justify-between items-center">
+                      <span style={{color:"rgba(255,255,255,0.5)",fontSize:"10px",fontWeight:600}}>TOTAL SCORE</span>
+                      <span style={{background:"linear-gradient(90deg,#f59e0b,#ef4444)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text",fontWeight:900,fontSize:"16px"}}>{Number(dm.diagnosis_total_score||0).toFixed(1)}</span>
+                    </div>
+                    <button onClick={()=>router.push("/mypage?tab=metrics")} style={{marginTop:"8px",width:"100%",background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:"8px",color:"rgba(255,255,255,0.8)",fontSize:"10px",fontWeight:600,padding:"5px 0",cursor:"pointer"}} className="hover:bg-white/15 transition-all">
+                      📊 詳細を見る →
+                    </button>
                   </div>
-                  <div style={{borderTop:`1px solid ${C.border}`}} className="flex justify-between pt-1.5">
-                    <span className="text-xs" style={{color:C.textMuted}}>TOTAL</span>
-                    <span style={{color:"#d97706"}} className="font-black text-xs">{Number(dm.diagnosis_total_score||0).toFixed(1)}</span>
-                  </div>
-                  <button onClick={()=>router.push("/diagnosis")} style={{border:`1px solid ${C.borderPrimary}`,color:C.primary,borderRadius:"8px"}} className="w-full mt-2 text-xs hover:text-indigo-700 py-1 transition-all">
-                    📊 診断 →
-                  </button>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             <div className="p-2 space-y-0.5" style={{borderTop:`1px solid ${C.border}`}}>
               {[
@@ -410,7 +485,7 @@ export default function ChatPage() {
         {/* MAIN */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* モードバー */}
-          <div style={{background:C.card, borderBottom:`1px solid ${C.border}`, scrollbarWidth:"none", msOverflowStyle:"none"} as React.CSSProperties} className="flex items-center gap-1.5 px-4 py-2 overflow-x-auto flex-shrink-0 [&::-webkit-scrollbar]:hidden">
+          <div style={{background:C.card, borderBottom:`1px solid ${C.border}`}} className="flex items-center gap-1.5 px-4 py-2 overflow-x-auto flex-shrink-0">
             <span style={{fontSize:"10px",fontWeight:700,color:C.textMuted,letterSpacing:"0.12em",whiteSpace:"nowrap",flexShrink:0,paddingRight:"4px"}}>モード選択</span>
             {purposeModes.map(m=>(
               <button key={m.id} onClick={()=>setPurposeMode(m.id)}
@@ -423,7 +498,12 @@ export default function ChatPage() {
               </button>
             ))}
           </div>
-
+          {/* フィードバックトースト */}
+          {feedbackToast && (
+            <div style={{position:"fixed",bottom:"80px",left:"50%",transform:"translateX(-50%)",background:"rgba(30,30,40,0.92)",color:"white",borderRadius:"12px",padding:"10px 24px",fontSize:"13px",fontWeight:600,zIndex:9999,boxShadow:"0 4px 20px rgba(0,0,0,0.3)",whiteSpace:"nowrap"}}>
+              {feedbackToast}
+            </div>
+          )}
           {/* アナウンス */}
           {headerCfg.announcement && (
             <div style={{background:"rgba(79,70,229,0.06)", borderBottom:`1px solid ${C.borderPrimary}`}} className="px-4 py-2 flex-shrink-0">
@@ -439,8 +519,8 @@ export default function ChatPage() {
                   <span className="text-white font-black text-2xl">A</span>
                 </div>
                 <div>
-                  <p className="text-xl font-black mb-1" style={{color:C.textMain}}>{headerCfg.title||"ASCEND"}</p>
-                  {headerCfg.subtitle && <p className="text-sm mt-1" style={{color:C.textSub}}>{headerCfg.subtitle}</p>}
+                  <p className="text-xl font-black mb-1" style={{color:C.textMain}}>{headerCfg.title||"Ys Consulting Office"}</p>
+                  <p className="text-xs mt-1" style={{color:C.textMuted}}>何でも相談してください</p>
                 </div>
                 <div className="grid grid-cols-2 gap-2 max-w-lg w-full">
                   {["売上を上げる戦略を教えて","リスクを最小化する方法は？","競合分析をしてほしい","意思決定の優先順位を整理したい"].map(q=>(
@@ -497,9 +577,69 @@ export default function ChatPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div style={{background:C.card, border:`1px solid ${C.border}`, borderRadius:"4px 18px 18px 18px", boxShadow:C.shadow}} className="px-5 py-4 text-sm leading-relaxed">
-                        <div className="prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1.5 [&_td]:text-xs [&_th]:border [&_th]:border-gray-200 [&_th]:px-2 [&_th]:py-1.5 [&_th]:bg-indigo-50 [&_th]:text-xs [&_code]:bg-indigo-50 [&_code]:px-1 [&_code]:rounded [&_code]:text-xs" style={{color:C.textMain}}>
-                          <ReactMarkdown>{m.content}</ReactMarkdown>
-                        </div>
+                        {(()=>{
+                          // JSON構造カード描画（consultResult系）
+                          try {
+                            const _s = (m.content||"").trim();
+                            if (_s.startsWith("{") || _s.startsWith("```json")) {
+                              const _clean = _s.replace(/^```json\s*/,"").replace(/\s*```$/,"").trim();
+                              const _j = JSON.parse(_clean);
+                              // structure診断
+                              if (_j.summary && _j.structure_layers) return (
+                                <div className="space-y-2">
+                                  <div style={{background:"rgba(79,70,229,0.06)",border:`1px solid ${C.borderPrimary}`,borderRadius:"12px",padding:"10px 14px"}}>
+                                    <p className="text-xs font-bold mb-1" style={{color:C.primary}}>📊 総合評価</p>
+                                    <p className="text-sm" style={{color:C.textMain}}>{_j.summary}</p>
+                                  </div>
+                                  {(_j.structure_layers||[]).map((l:Record<string,unknown>,i:number)=>(
+                                    <div key={i} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"10px",padding:"8px 12px",display:"flex",gap:"10px",alignItems:"flex-start"}}>
+                                      <span style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,color:"white",borderRadius:"6px",padding:"2px 8px",fontSize:"10px",fontWeight:700,flexShrink:0}}>{String(l.layer||"")}</span>
+                                      <div><p className="text-xs" style={{color:C.textMain}}>{String(l.content||"")}</p></div>
+                                    </div>
+                                  ))}
+                                  {_j.key_bottleneck && <div style={{background:"rgba(239,68,68,0.06)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:"10px",padding:"8px 12px"}}><p className="text-xs font-bold" style={{color:"#dc2626"}}>🎯 主要ボトルネック: {String(_j.key_bottleneck)}</p></div>}
+                                  {(_j.next_actions||[]).length>0 && <div style={{background:"rgba(16,185,129,0.06)",border:"1px solid rgba(16,185,129,0.2)",borderRadius:"10px",padding:"8px 12px"}}><p className="text-xs font-bold mb-1" style={{color:"#059669"}}>✅ 推奨アクション</p>{(_j.next_actions||[]).map((a:string,i:number)=><p key={i} className="text-xs" style={{color:C.textMain}}>• {a}</p>)}</div>}
+                                </div>
+                              );
+                              // issue診断
+                              if (_j.hypotheses && _j.root_cause) return (
+                                <div className="space-y-2">
+                                  {(_j.hypotheses||[]).map((h:Record<string,unknown>,i:number)=>(
+                                    <div key={i} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"10px",padding:"10px 14px"}}>
+                                      <div className="flex gap-2 items-center mb-1">
+                                        <span style={{background:h.priority==="high"?"rgba(239,68,68,0.1)":h.priority==="mid"?"rgba(245,158,11,0.1)":"rgba(16,185,129,0.1)",color:h.priority==="high"?"#dc2626":h.priority==="mid"?"#d97706":"#059669",borderRadius:"6px",padding:"1px 8px",fontSize:"10px",fontWeight:700}}>{String(h.priority||"").toUpperCase()}</span>
+                                        <p className="text-xs font-bold" style={{color:C.textMain}}>{String(h.hypothesis||"")}</p>
+                                      </div>
+                                      <p className="text-xs" style={{color:C.textSub}}>根拠: {String(h.evidence||"")}</p>
+                                    </div>
+                                  ))}
+                                  <div style={{background:"rgba(79,70,229,0.06)",border:`1px solid ${C.borderPrimary}`,borderRadius:"10px",padding:"8px 12px"}}><p className="text-xs font-bold" style={{color:C.primary}}>🔍 根本原因: {String(_j.root_cause)}</p></div>
+                                </div>
+                              );
+                              // execution計画
+                              if (_j.phases && _j.critical_path) return (
+                                <div className="space-y-2">
+                                  {(_j.phases||[]).map((p:Record<string,unknown>,i:number)=>(
+                                    <div key={i} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"10px",padding:"10px 14px"}}>
+                                      <div className="flex gap-2 items-center mb-1">
+                                        <span style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,color:"white",borderRadius:"6px",padding:"2px 8px",fontSize:"10px",fontWeight:700}}>{String(p.phase||"")}</span>
+                                        <span className="text-xs" style={{color:C.textMuted}}>{String(p.duration||"")}</span>
+                                      </div>
+                                      {(p.actions as string[]||[]).map((a:string,j:number)=><p key={j} className="text-xs" style={{color:C.textMain}}>• {a}</p>)}
+                                      {p.kpi ? <p className="text-xs mt-1" style={{color:C.primary}}>KPI: {String(p.kpi)}</p> : null}
+                                    </div>
+                                  ))}
+                                </div>
+                              );
+                            }
+                          } catch {}
+                          // フォールバック: 通常Markdown
+                          return (
+                            <div className="prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1.5 [&_td]:text-xs [&_th]:border [&_th]:border-gray-200 [&_th]:px-2 [&_th]:py-1.5 [&_th]:bg-indigo-50 [&_th]:text-xs [&_code]:bg-indigo-50 [&_code]:px-1 [&_code]:rounded [&_code]:text-xs" style={{color:C.textMain}}>
+                              <ReactMarkdown>{m.content}</ReactMarkdown>
+                            </div>
+                          );
+                        })()}
                         {m.images && m.images.length>0 && (
                           <div className="mt-3 space-y-2">
                             {m.images.map((img,ii)=>(
@@ -586,8 +726,20 @@ export default function ChatPage() {
                 <div style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`}} className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0">
                   <span className="text-white font-black text-xs">A</span>
                 </div>
-                <div style={{background:C.card, border:`1px solid ${C.border}`, borderRadius:"4px 18px 18px 18px", boxShadow:C.shadow}} className="px-5 py-3.5 flex items-center gap-1.5">
-                  {[0,1,2].map(i=><div key={i} className="w-1.5 h-1.5 rounded-full animate-bounce" style={{background:C.primary,animationDelay:`${i*0.15}s`}}/>)}
+                <div style={{background:C.card, border:`1px solid ${C.border}`, borderRadius:"4px 18px 18px 18px", boxShadow:C.shadow}} className="px-5 py-3.5">
+                  {[
+                    "Step 0: 入力を受付中...",
+                    "Step 1: 意図を解析中...",
+                    "Step 2: ナレッジを検索中...",
+                    "Step 3: 回答を構築中...",
+                    "Step 4: 出力を最適化中...",
+                    "Step 5: 仕上げ中...",
+                  ].map((label,i)=>(
+                    <div key={i} className="flex items-center gap-2 text-xs" style={{color:i===loadingStep?C.primary:i<loadingStep?"#9ca3af":"#d1d5db",fontWeight:i===loadingStep?700:400,marginBottom:"2px",transition:"all 0.3s"}}>
+                      <span style={{fontSize:"8px"}}>{i<loadingStep?"✓":i===loadingStep?"▶":"○"}</span>
+                      {label}
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -627,20 +779,20 @@ export default function ChatPage() {
           <div style={{background:C.card, borderTop:`1px solid ${C.border}`, backdropFilter:"blur(12px)"}} className="px-4 py-3 flex-shrink-0">
             <form onSubmit={handleSend} className="flex gap-2 items-end">
               <input ref={fileRef} type="file" onChange={handleFileChange} className="hidden" accept=".txt,.md,.csv,.pdf,.xlsx,.xls,.json,.py,.js,.ts,.png,.jpg,.jpeg,.webp"/>
-              <button type="button" onClick={()=>fileRef.current?.click()} disabled={attachLoading}
-                style={{background:"rgba(0,0,0,0.04)",border:`1px solid ${C.border}`,borderRadius:"12px",flexShrink:0,color:C.textSub}}
-                className="hover:text-indigo-500 hover:border-indigo-300 p-3 transition-all disabled:opacity-50">
-                {attachLoading ? "⏳" : "🗂️"}
-              </button>
-              <button type="button" onClick={()=>setShowInputExample(!showInputExample)}
-                style={{background:"rgba(0,0,0,0.04)",border:`1px solid ${C.border}`,borderRadius:"12px",flexShrink:0,color:C.textSub}}
-                className="hover:text-yellow-500 hover:border-yellow-300 p-3 transition-all text-sm">💡</button>
-              <div style={{background:"rgba(0,0,0,0.02)",border:`1px solid ${C.border}`,borderRadius:"16px"}} className="flex-1 focus-within:border-indigo-400 transition-all">
+              <div style={{background:"rgba(0,0,0,0.02)",border:`1px solid ${C.border}`,borderRadius:"16px",display:"flex",alignItems:"flex-end",gap:"4px",padding:"6px 8px 6px 8px"}} className="flex-1 focus-within:border-indigo-400 transition-all">
+                <button type="button" onClick={()=>fileRef.current?.click()} disabled={attachLoading}
+                  style={{background:"transparent",border:"none",borderRadius:"8px",color:C.textMuted,padding:"6px",flexShrink:0,fontSize:"16px",lineHeight:1,cursor:"pointer"}}
+                  className="hover:text-indigo-500 transition-all disabled:opacity-50">
+                  {attachLoading ? "⏳" : "🗂️"}
+                </button>
+                <button type="button" onClick={()=>setShowInputExample(!showInputExample)}
+                  style={{background:"transparent",border:"none",borderRadius:"8px",color:C.textMuted,padding:"6px",flexShrink:0,fontSize:"16px",lineHeight:1,cursor:"pointer"}}
+                  className="hover:text-yellow-500 transition-all">💡</button>
                 <textarea value={input} onChange={e=>setInput(e.target.value)}
                   onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();handleSend(e as unknown as React.FormEvent);}}}
                   disabled={loading} placeholder="コンサルタントに相談... (Shift+Enterで改行)"
-                  rows={1} style={{background:"transparent",resize:"none",minHeight:"44px",maxHeight:"160px",color:C.textMain}}
-                  className="w-full text-sm px-4 py-3 focus:outline-none placeholder-gray-400 disabled:opacity-50 leading-relaxed"
+                  rows={1} style={{background:"transparent",resize:"none",minHeight:"36px",maxHeight:"160px",color:C.textMain,flex:1}}
+                  className="text-sm px-2 py-1.5 focus:outline-none placeholder-gray-400 disabled:opacity-50 leading-relaxed"
                 />
               </div>
               <button type="submit" disabled={loading||(!input.trim()&&!attachment)}

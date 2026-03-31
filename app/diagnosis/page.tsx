@@ -31,6 +31,9 @@ export default function DiagnosisPage() {
   const [error, setError] = useState("");
   // コンサルAI
   const [inputText, setInputText] = useState("");
+  const [inputMap, setInputMap] = useState<Record<string,string>>({});
+  const getInput = (t:string) => inputMap[t] ?? "";
+  const setInput = (t:string, v:string) => setInputMap(m=>({...m,[t]:v}));
   const [supplement, setSupplement] = useState("");
   const [options, setOptions] = useState("");
   const [strategy, setStrategy] = useState("");
@@ -60,58 +63,93 @@ export default function DiagnosisPage() {
       .then(r=>r.json()).then(d=>setChatMessages(d.messages||[])).catch(()=>{});
   }, []);
 
-  useEffect(() => {
-    if (!graphRef.current || chatMessages.length === 0) return;
-    const script = document.createElement("script");
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.9/vis-network.min.js";
-    script.onload = () => {
-      const nodes: {id:number;label:string;color:string;shape:string}[] = [];
-      const edges: {from:number;to:number}[] = [];
-      chatMessages.slice(-12).forEach((m, i) => {
-        const label = (m.content||"").slice(0, 20) + ((m.content||"").length > 20 ? "…" : "");
-        nodes.push({ id: i+1, label, color: m.role==="user"?"#4f46e5":"#7c3aed", shape: m.role==="user"?"dot":"box" });
-        if (i > 0) edges.push({ from: i, to: i+1 });
-      });
-      const container = graphRef.current!;
-      container.style.height = "200px";
-      // @ts-ignore
-      new window.vis.Network(container, { nodes: new window.vis.DataSet(nodes), edges: new window.vis.DataSet(edges) }, {
-        physics: { stabilization: { iterations: 50 } },
-        nodes: { font: { size: 10, color: "#fff" }, borderWidth: 0 },
-        edges: { color: { color: "rgba(99,102,241,0.4)" }, arrows: "to", width: 1 },
-      });
-    };
-    document.head.appendChild(script);
-    return () => { try { document.head.removeChild(script); } catch {} };
-  }, [chatMessages]);
 
   async function fetchHistory() {
     try {
-      const res = await fetch("/api/diagnosis/list", { headers: authHeaders() });
+      const res = await fetch(`${API_BASE}/api/diagnosis/list`, { headers: authHeaders() });
       if (res.ok) { const d = await res.json(); setHistory(d.diagnoses||[]); if(d.diagnoses?.length>0) setReport(d.diagnoses[0].report_md); }
     } catch {}
   }
   async function fetchFrameworks() {
     try {
-      const res = await fetch("/api/diagnosis/frameworks", { headers: authHeaders() });
+      const res = await fetch(`${API_BASE}/api/diagnosis/frameworks`, { headers: authHeaders() });
       if (res.ok) { const d = await res.json(); setFrameworks(d.frameworks||[]); }
     } catch {}
   }
   async function fetchSignals() {
     try {
-      const res = await fetch("/api/investment/signals", { headers: authHeaders() });
+      const res = await fetch(`${API_BASE}/api/investment/signals`, { headers: authHeaders() });
       if (res.ok) { const d = await res.json(); setSignals(d.signals); }
     } catch {}
   }
   const [stockResult, setStockResult] = useState<Record<string,any>|null>(null);
   const [stockLoading, setStockLoading] = useState(false);
+  const [graphData, setGraphData] = useState<{nodes:{id:string;label:string}[];edges:{from:string;to:string}[]}|null>(null);
+  const [graphLoading, setGraphLoading] = useState(false);
+  async function fetchGraphData() {
+    setGraphLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/diagnosis/thought_map`, { headers: authHeaders() });
+      if (!res.ok) { setError("グラフ取得失敗"); setGraphLoading(false); return; }
+      const d = await res.json();
+      if (!d.nodes || d.nodes.length === 0) { setError("チャット履歴が見つかりません"); setGraphLoading(false); return; }
+      setGraphData(d);
+      const TOPIC_COLORS: Record<string,string> = {
+        "戦略・競合":"#4f46e5","集客・SNS":"#0891b2","売上・財務":"#059669",
+        "組織・人材":"#d97706","投資・株":"#dc2626","診断・分析":"#7c3aed",
+        "指名・接客":"#db2777","その他":"#6b7280"
+      };
+      const _nodes = d.nodes.map((n: {id:string;label:string;group?:string;is_center?:boolean}) => ({
+        id: n.id,
+        label: (n.label||"").slice(0,15),
+        color: { background: TOPIC_COLORS[n.group||"その他"]||"#6366f1", border: "rgba(255,255,255,0.3)" },
+        size: n.is_center ? 35 : 18,
+        shape: n.is_center ? "ellipse" : "dot",
+        font: { size: n.is_center ? 13 : 10, color: "#111827", bold: n.is_center },
+        shadow: true,
+      }));
+      const _edges = d.edges.map((e: {from:string;to:string;topic?:string}) => ({
+        from: e.from, to: e.to,
+        color: { color: TOPIC_COLORS[e.topic||"その他"]||"rgba(99,102,241,0.4)", opacity: 0.6 },
+        width: 1.5, arrows: "to",
+      }));
+      const _draw = () => {
+        if (!graphRef.current) return;
+        graphRef.current.style.height = "400px";
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const _vis = (window as any).vis;
+        if (!_vis) return;
+        new _vis.Network(graphRef.current,
+          { nodes: new _vis.DataSet(_nodes), edges: new _vis.DataSet(_edges) },
+          { physics:{barnesHut:{gravitationalConstant:-3000,centralGravity:0.3,springLength:120},stabilization:{iterations:300},fit:true}, layout:{improvedLayout:true}, interaction:{hover:true,tooltipDelay:100}, nodes:{borderWidth:1,shadow:{enabled:true,color:"rgba(0,0,0,0.12)",x:2,y:2,size:6}}, edges:{smooth:{type:"curvedCW",roundness:0.2},shadow:true} }
+        );
+        setGraphLoading(false);
+      };
+      let _att = 0;
+      const _poll = setInterval(() => {
+        _att++;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        if ((window as any).vis) { clearInterval(_poll); _draw(); }
+        else if (_att > 30) { clearInterval(_poll); setError("描画失敗"); setGraphLoading(false); }
+      }, 200);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (!(window as any).vis) {
+        const _s = document.createElement("script");
+        _s.src = "https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js";
+        _s.onload = () => { clearInterval(_poll); _draw(); };
+        _s.onerror = () => { clearInterval(_poll); setError("visライブラリロード失敗"); setGraphLoading(false); };
+        document.head.appendChild(_s);
+      }
+    } catch(e:unknown) { setError(e instanceof Error ? e.message : "エラー"); setGraphLoading(false); }
+  }
   async function fetchStockAnalysis() {
-    if (!inputText.trim()) return;
+    if (!getInput("investment").trim()) return;
     setStockLoading(true); setError("");  setStockResult(null);
     try {
       const res = await fetch(`${API_BASE}/api/investment/stock_analysis`, {
         method:"POST", headers:authHeaders(),
-        body:JSON.stringify({query: inputText.trim()})
+        body:JSON.stringify({query: getInput("investment").trim()})
       });
       if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail||"エラー"); }
       const d = await res.json();
@@ -142,7 +180,7 @@ export default function DiagnosisPage() {
   async function handleConsult(analysisType: string) {
     setLoading(true); setError(""); setConsultResult(null); setActiveAnalysisType(analysisType);
     try {
-      const body = { analysis_type:analysisType, input_text:inputText, supplement, options, strategy, policy };
+      const body = { analysis_type:analysisType, input_text:getInput(analysisType), supplement, options, strategy, policy };
       const res = await fetch(`${API_BASE}/api/diagnosis/consult`, { method:"POST", headers:authHeaders(), body:JSON.stringify(body) });
       if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail||"エラー"); }
       const d = await res.json();
@@ -378,6 +416,8 @@ export default function DiagnosisPage() {
       <nav style={{background:"rgba(255,255,255,0.95)",borderBottom:`1px solid ${C.border}`,backdropFilter:"blur(12px)",boxShadow:C.shadow,position:"sticky",top:0,zIndex:50}} className="flex items-center gap-4 px-6 py-3">
         <button onClick={()=>router.push("/chat")} style={{color:C.textMuted}} className="text-sm hover:text-gray-700 transition-colors">← チャット</button>
         <span style={{color:C.border}}>|</span>
+        <button onClick={()=>router.push("/mypage")} style={{color:C.textMuted}} className="text-sm hover:text-gray-700 transition-colors">マイページ</button>
+        <span style={{color:C.border}}>|</span>
         <h1 className="text-base font-bold" style={{color:C.textMain}}>診断・分析</h1>
       </nav>
 
@@ -422,10 +462,6 @@ export default function DiagnosisPage() {
                 </div>
               </div>
             )}
-            <div style={{background:"#fff",borderRadius:16,padding:16,marginBottom:16,border:"1px solid rgba(0,0,0,0.06)"}}>
-              <div style={{fontWeight:900,fontSize:16,marginBottom:12}}>会話の可視化</div>
-              <div ref={graphRef} />
-            </div>
           <div className="space-y-4">
             <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",boxShadow:C.shadow}} className="p-5">
               <p className="text-sm text-gray-500 mb-4">直近のチャット履歴をAIが分析し、あなたの現状課題と意思決定パターンを診断します。</p>
@@ -499,13 +535,13 @@ export default function DiagnosisPage() {
             <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",boxShadow:C.shadow}} className="p-5">
               <p className="text-sm font-bold mb-3" style={{color:C.textMain}}>🏗️ 構造診断</p>
               <p className="text-xs mb-4" style={{color:C.textSub}}>事業・組織・戦略の構造を解剖し、ボトルネックを特定します</p>
-              <textarea value={inputText} onChange={e=>setInputText(e.target.value)} placeholder="【現状・課題】を入力してください&#10;例：月商300万が1年間横ばい。新規は広告依存、リピートは口コミのみ。"
+              <textarea value={getInput("structure")} onChange={e=>setInput("structure",e.target.value)} placeholder="【現状・課題】を入力してください&#10;例：月商300万が1年間横ばい。新規は広告依存、リピートは口コミのみ。"
                 style={{background:"rgba(0,0,0,0.02)",border:`1px solid ${C.border}`,borderRadius:"12px",color:C.textMain,width:"100%",resize:"vertical"}}
                 className="text-sm px-4 py-3 focus:outline-none placeholder-gray-400" rows={5}/>
               <textarea value={supplement} onChange={e=>setSupplement(e.target.value)} placeholder="補足情報（任意）"
                 style={{background:"rgba(0,0,0,0.02)",border:`1px solid ${C.border}`,borderRadius:"12px",color:C.textMain,width:"100%",resize:"none",marginTop:"8px"}}
                 className="text-sm px-4 py-2 focus:outline-none placeholder-gray-400" rows={2}/>
-              <button onClick={()=>handleConsult("structure")} disabled={loading||!inputText.trim()}
+              <button onClick={()=>handleConsult("structure")} disabled={loading||!getInput("structure").trim()}
                 style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,boxShadow:C.shadowPrimary,borderRadius:"12px",marginTop:"12px"}}
                 className="text-white text-sm font-bold px-6 py-2.5 hover:opacity-90 disabled:opacity-50">
                 {loading?"分析中...":"構造診断を実行"}
@@ -521,10 +557,10 @@ export default function DiagnosisPage() {
             <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",boxShadow:C.shadow}} className="p-5">
               <p className="text-sm font-bold mb-3" style={{color:C.textMain}}>🎯 課題仮説生成</p>
               <p className="text-xs mb-4" style={{color:C.textSub}}>状況から複数の課題仮説を生成し、優先度と検証方法を提示します</p>
-              <textarea value={inputText} onChange={e=>setInputText(e.target.value)} placeholder="状況・背景を入力してください"
+              <textarea value={getInput("issue")} onChange={e=>setInput("issue",e.target.value)} placeholder="状況・背景を入力してください"
                 style={{background:"rgba(0,0,0,0.02)",border:`1px solid ${C.border}`,borderRadius:"12px",color:C.textMain,width:"100%",resize:"vertical"}}
                 className="text-sm px-4 py-3 focus:outline-none placeholder-gray-400" rows={5}/>
-              <button onClick={()=>handleConsult("issue")} disabled={loading||!inputText.trim()}
+              <button onClick={()=>handleConsult("issue")} disabled={loading||!getInput("issue").trim()}
                 style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,boxShadow:C.shadowPrimary,borderRadius:"12px",marginTop:"12px"}}
                 className="text-white text-sm font-bold px-6 py-2.5 hover:opacity-90 disabled:opacity-50">
                 {loading?"分析中...":"課題仮説を生成"}
@@ -543,7 +579,7 @@ export default function DiagnosisPage() {
               <textarea value={options} onChange={e=>setOptions(e.target.value)} placeholder="比較する選択肢（改行区切り）&#10;例：A案: 広告強化&#10;B案: 紹介制度導入&#10;C案: 単価アップ"
                 style={{background:"rgba(0,0,0,0.02)",border:`1px solid ${C.border}`,borderRadius:"12px",color:C.textMain,width:"100%",resize:"vertical"}}
                 className="text-sm px-4 py-3 focus:outline-none placeholder-gray-400" rows={4}/>
-              <textarea value={inputText} onChange={e=>setInputText(e.target.value)} placeholder="判断の背景・制約条件（任意）"
+              <textarea value={getInput("comparison")} onChange={e=>setInput("comparison",e.target.value)} placeholder="判断の背景・制約条件（任意）"
                 style={{background:"rgba(0,0,0,0.02)",border:`1px solid ${C.border}`,borderRadius:"12px",color:C.textMain,width:"100%",resize:"none",marginTop:"8px"}}
                 className="text-sm px-4 py-2 focus:outline-none placeholder-gray-400" rows={2}/>
               <button onClick={()=>handleConsult("comparison")} disabled={loading||!options.trim()}
@@ -584,10 +620,10 @@ export default function DiagnosisPage() {
             <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",boxShadow:C.shadow}} className="p-5">
               <p className="text-sm font-bold mb-3" style={{color:C.textMain}}>📋 実行計画生成</p>
               <p className="text-xs mb-4" style={{color:C.textSub}}>目標に対するフェーズ別実行計画・KPI・リスクを生成します</p>
-              <textarea value={inputText} onChange={e=>setInputText(e.target.value)} placeholder="目標・背景を入力してください&#10;例：半年で月商500万達成。現状300万。スタッフ3名。"
+              <textarea value={getInput("execution")} onChange={e=>setInput("execution",e.target.value)} placeholder="目標・背景を入力してください&#10;例：半年で月商500万達成。現状300万。スタッフ3名。"
                 style={{background:"rgba(0,0,0,0.02)",border:`1px solid ${C.border}`,borderRadius:"12px",color:C.textMain,width:"100%",resize:"vertical"}}
                 className="text-sm px-4 py-3 focus:outline-none placeholder-gray-400" rows={5}/>
-              <button onClick={()=>handleConsult("execution")} disabled={loading||!inputText.trim()}
+              <button onClick={()=>handleConsult("execution")} disabled={loading||!getInput("execution").trim()}
                 style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,boxShadow:C.shadowPrimary,borderRadius:"12px",marginTop:"12px"}}
                 className="text-white text-sm font-bold px-6 py-2.5 hover:opacity-90 disabled:opacity-50">
                 {loading?"生成中...":"実行計画を生成"}
@@ -984,16 +1020,31 @@ export default function DiagnosisPage() {
             )}
           </div>
         )}
-
-                {tab==="graph" && (
+        {tab==="graph" && (
           <div className="space-y-4">
             <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",boxShadow:C.shadow}} className="p-5">
               <p className="text-sm font-bold mb-2" style={{color:C.textMain}}>📊 会話ネットワーク可視化</p>
-              <p className="text-xs mb-4" style={{color:C.textSub}}>直近のチャット履歴を会話グラフとして可視化します。ノードをドラッグして動かせます。</p>
-              <div ref={graphRef} style={{height:"400px",background:"rgba(0,0,0,0.02)",borderRadius:"12px",border:`1px solid ${C.border}`}}/>
+              <p className="text-xs mb-3" style={{color:C.textSub}}>直近のチャット履歴を会話グラフとして可視化します。ノードをドラッグして動かせます。</p>
+              <button onClick={fetchGraphData} disabled={graphLoading}
+                style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,borderRadius:"12px",padding:"10px 24px",border:"none",cursor:"pointer",boxShadow:"0 4px 12px rgba(79,70,229,0.3)",opacity:graphLoading?0.7:1,marginBottom:"16px",display:"inline-block"}}
+                className="text-white font-bold text-sm hover:opacity-90 transition-all disabled:cursor-not-allowed">
+                {graphLoading ? "生成中..." : "📊 会話グラフを生成"}
+              </button>
+              {graphLoading && (
+                <div className="text-center py-8">
+                  <div style={{display:"inline-block",width:"32px",height:"32px",border:`3px solid ${C.border}`,borderTop:`3px solid ${C.primary}`,borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+                  <p className="text-xs mt-3" style={{color:C.textMuted}}>チャット履歴を解析中...</p>
+                  <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+                </div>
+              )}
+              {!graphData && !graphLoading && (
+                <p className="text-xs text-center py-8" style={{color:C.textMuted}}>「会話グラフを生成」を押すと直近チャット履歴を可視化します</p>
+              )}
+              <div ref={graphRef} style={{width:"100%",height:"400px",background:"rgba(0,0,0,0.02)",borderRadius:"12px",border:`1px solid ${C.border}`}}/>
             </div>
           </div>
         )}
+
       </div>
     </div>
   );

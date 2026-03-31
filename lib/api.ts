@@ -74,12 +74,13 @@ export interface SendResult {
 export async function sendMessage(
   message: string,
   chat_id: string = "main",
-  ai_tier: string = "core"
+  ai_tier: string = "core",
+  purpose_mode: string = "auto"
 ): Promise<SendResult> {
   const res = await fetch(`${API_BASE}/api/chat/send`, {
     method: "POST",
     headers: authHeaders(),
-    body: JSON.stringify({ message, chat_id, ai_tier }),
+    body: JSON.stringify({ message, chat_id, ai_tier, purpose_mode }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -159,7 +160,6 @@ export interface UserStats {
   next_pt: string;
   rank_cfg: { rank_1_name: string; rank_2_name: string; rank_3_name: string; rank_4_name: string };
   decision_metrics: Record<string, number | string> | null;
-  fixed_concept_score: number | null;
   use_count_since_report: number;
   fc_report_unlocked: boolean;
   fc_report_threshold: number;
@@ -168,6 +168,9 @@ export interface UserStats {
   diag_available: boolean;
   diag_next_unlock: number;
   diag_checkpoint: number;
+  fixed_concept_score: number | null;
+  is_unlimited?: boolean;
+  level_last_delta?: number;
 }
 
 export async function getUserStats(): Promise<UserStats | null> {
@@ -399,4 +402,87 @@ export async function lgbmPredict(prompt: string): Promise<string> {
   if (!res.ok) return "auto";
   const d = await res.json();
   return d.mode || "auto";
+}
+
+export async function getCustomPrompt(): Promise<{custom_sys_prompt:string;custom_prompt_mode:string;has_custom:boolean}> {
+  const res = await fetch(`${API_BASE}/api/user/custom_prompt`, { headers: authHeaders() });
+  if (!res.ok) return {custom_sys_prompt:"",custom_prompt_mode:"append",has_custom:false};
+  return res.json();
+}
+
+export async function saveCustomPrompt(custom_sys_prompt: string, custom_prompt_mode: string): Promise<void> {
+  await fetch(`${API_BASE}/api/user/custom_prompt`, {
+    method: "POST", headers: authHeaders(),
+    body: JSON.stringify({ custom_sys_prompt, custom_prompt_mode }),
+  });
+}
+
+export async function sendImageMessage(
+  message: string,
+  chat_id: string = "main",
+  ai_tier: string = "core",
+  image_b64?: string,
+  image_mime?: string
+): Promise<SendResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 180000);
+  try {
+    const res = await fetch(`${API_BASE}/api/chat/send_image`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ message, chat_id, ai_tier, image_b64, image_mime }),
+      signal: controller.signal,
+    });
+    if (!res.ok) { const err = await res.json().catch(()=>({})); throw new Error(err.detail||"画像送信失敗"); }
+    return res.json();
+  } catch(e: unknown) {
+    if (e instanceof Error && e.name==="AbortError") throw new Error("応答に時間がかかっています。");
+    throw e;
+  } finally { clearTimeout(timer); }
+}
+
+export async function sendFileMessage(
+  message: string,
+  chat_id: string = "main",
+  ai_tier: string = "core",
+  file_text: string = "",
+  filename: string = ""
+): Promise<SendResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 180000);
+  try {
+    const res = await fetch(`${API_BASE}/api/chat/send_file`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ message, chat_id, ai_tier, file_text, filename }),
+      signal: controller.signal,
+    });
+    if (!res.ok) { const err = await res.json().catch(()=>({})); throw new Error(err.detail||"ファイル送信失敗"); }
+    return res.json();
+  } catch(e: unknown) {
+    if (e instanceof Error && e.name==="AbortError") throw new Error("応答に時間がかかっています。");
+    throw e;
+  } finally { clearTimeout(timer); }
+}
+
+export async function sendInvestMessage(
+  message: string,
+  chat_id: string = "main",
+  ai_tier: string = "core"
+): Promise<SendResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 180000);
+  try {
+    const res = await fetch(`${API_BASE}/api/chat/send_invest`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ message, chat_id, ai_tier }),
+      signal: controller.signal,
+    });
+    if (!res.ok) { const err = await res.json().catch(()=>({})); throw new Error(err.detail||"投資送信失敗"); }
+    return res.json();
+  } catch(e: unknown) {
+    if (e instanceof Error && e.name==="AbortError") throw new Error("応答に時間がかかっています。");
+    throw e;
+  } finally { clearTimeout(timer); }
 }
