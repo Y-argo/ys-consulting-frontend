@@ -61,6 +61,13 @@ export interface Message {
   role: "user" | "assistant";
   content: string;
   cases?: string[];
+  structured?: {
+    summary: string;
+    cards: { current: string[]; risk: string[]; plan: string[] };
+    analysis: { type: string; urgency: string; importance: string; mode: string };
+    actions: string[];
+    value_message: string;
+  };
 }
 
 export interface SendResult {
@@ -69,6 +76,13 @@ export interface SendResult {
   msg_id: string;
   cases?: string[];
   images?: {mime_type:string; data:string}[];
+  structured?: {
+    summary: string;
+    cards: { current: string[]; risk: string[]; plan: string[] };
+    analysis: { type: string; urgency: string; importance: string; mode: string };
+    actions: string[];
+    value_message: string;
+  };
 }
 
 export async function sendMessage(

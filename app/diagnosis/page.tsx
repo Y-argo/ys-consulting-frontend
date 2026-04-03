@@ -1,17 +1,19 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 const ReactMarkdown = dynamic(() => import("react-markdown"), { ssr: false, loading: () => null });
+const FileDiagnosis = dynamic(() => import("./FileDiagnosis"), { ssr: false, loading: () => null });
 import { getStoredUser, getUserStats, UserStats, getMyFeatures } from "@/lib/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+
 function authHeaders(): HeadersInit {
   const token = typeof window !== "undefined" ? localStorage.getItem("ascend_token") || "" : "";
   return token ? { "Content-Type": "application/json", Authorization: `Bearer ${token}` } : { "Content-Type": "application/json" };
 }
 
-type TabId = "diagnosis"|"structure"|"issue"|"comparison"|"contradiction"|"execution"|"investment"|"graph";
+type TabId = "diagnosis"|"structure"|"issue"|"comparison"|"contradiction"|"execution"|"investment"|"graph"|"file";
 
 const C = {
   bg:"#f8f9fc", card:"#ffffff", primary:"#4f46e5", primary2:"#7c3aed",
@@ -23,7 +25,7 @@ const C = {
 
 export default function DiagnosisPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<TabId>(()=>(typeof window!=="undefined"?(localStorage.getItem("diag_tab") as TabId)||"diagnosis":"diagnosis"));
+  const [tab, setTab] = useState<TabId>("diagnosis");
   const graphRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState("");
@@ -53,6 +55,8 @@ export default function DiagnosisPage() {
   const [features, setFeatures] = useState<Record<string,boolean>>({});
 
   useEffect(() => {
+    const savedTab = localStorage.getItem("diag_tab") as TabId;
+    if (savedTab) setTab(savedTab);
     if (!getStoredUser()) { router.push("/"); return; }
     fetchHistory();
     fetchFrameworks();
@@ -95,40 +99,60 @@ export default function DiagnosisPage() {
       if (!d.nodes || d.nodes.length === 0) { setError("チャット履歴が見つかりません"); setGraphLoading(false); return; }
       setGraphData(d);
       const TOPIC_COLORS: Record<string,string> = {
-        "戦略・競合":"#4f46e5","集客・SNS":"#0891b2","売上・財務":"#059669",
-        "組織・人材":"#d97706","投資・株":"#dc2626","診断・分析":"#7c3aed",
-        "指名・接客":"#db2777","その他":"#6b7280"
+        "戦略・競合":"#6366f1","集客・SNS":"#0891b2","売上・財務":"#059669",
+        "組織・人材":"#d97706","投資・株":"#dc2626","診断・分析":"#8b5cf6",
+        "指名・接客":"#db2777","その他":"#475569"
       };
-      const _nodes = d.nodes.map((n: {id:string;label:string;group?:string;is_center?:boolean}) => ({
-        id: n.id,
-        label: (n.label||"").slice(0,15),
-        color: { background: TOPIC_COLORS[n.group||"その他"]||"#6366f1", border: "rgba(255,255,255,0.3)" },
-        size: n.is_center ? 35 : 18,
-        shape: n.is_center ? "ellipse" : "dot",
-        font: { size: n.is_center ? 13 : 10, color: "#111827", bold: n.is_center },
-        shadow: true,
-      }));
+      const _nodes = d.nodes.map((n: {id:string;label:string;group?:string;is_center?:boolean}) => {
+        const _bg = TOPIC_COLORS[n.group||"その他"]||"#6366f1";
+        return {
+          id: n.id,
+          label: (n.label||"").slice(0, n.is_center ? 18 : 12),
+          title: n.label||"",
+          color: {
+            background: _bg,
+            border: "rgba(255,255,255,0.25)",
+            highlight: { background: _bg, border: "rgba(255,255,255,0.8)" },
+            hover: { background: _bg, border: "rgba(255,255,255,0.6)" },
+          },
+          size: n.is_center ? 38 : 20,
+          shape: n.is_center ? "ellipse" : "dot",
+          font: { size: n.is_center ? 13 : 10, color: "#ffffff", bold: n.is_center, strokeWidth: 2, strokeColor: "rgba(0,0,0,0.6)" },
+          shadow: { enabled: true, color: `${_bg}88`, x: 0, y: 0, size: n.is_center ? 16 : 8 },
+          borderWidth: n.is_center ? 2 : 1,
+        };
+      });
       const _edges = d.edges.map((e: {from:string;to:string;topic?:string}) => ({
         from: e.from, to: e.to,
-        color: { color: TOPIC_COLORS[e.topic||"その他"]||"rgba(99,102,241,0.4)", opacity: 0.6 },
-        width: 1.5, arrows: "to",
+        color: { color: TOPIC_COLORS[e.topic||"その他"]||"rgba(99,102,241,0.5)", opacity: 0.55, highlight: "#ffffff" },
+        width: 1.5, arrows: { to: { enabled: true, scaleFactor: 0.6 } },
+        smooth: { type: "curvedCW", roundness: 0.15 },
+        shadow: { enabled: true, color: "rgba(0,0,0,0.3)", x: 0, y: 2, size: 4 },
       }));
       const _draw = () => {
         if (!graphRef.current) return;
-        graphRef.current.style.height = "400px";
+        graphRef.current.style.height = "480px";
+        graphRef.current.style.background = "linear-gradient(135deg,#0f0c29,#1a1040,#0d0d1a)";
+        graphRef.current.style.borderRadius = "0 0 16px 16px";
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const _vis = (window as any).vis;
         if (!_vis) return;
         new _vis.Network(graphRef.current,
           { nodes: new _vis.DataSet(_nodes), edges: new _vis.DataSet(_edges) },
-          { physics:{barnesHut:{gravitationalConstant:-3000,centralGravity:0.3,springLength:120},stabilization:{iterations:300},fit:true}, layout:{improvedLayout:true}, interaction:{hover:true,tooltipDelay:100}, nodes:{borderWidth:1,shadow:{enabled:true,color:"rgba(0,0,0,0.12)",x:2,y:2,size:6}}, edges:{smooth:{type:"curvedCW",roundness:0.2},shadow:true} }
+          {
+            physics: { barnesHut: { gravitationalConstant: -4000, centralGravity: 0.4, springLength: 140, springConstant: 0.05, damping: 0.12 }, stabilization: { iterations: 400, fit: true }, minVelocity: 0.5 },
+            layout: { improvedLayout: true },
+            interaction: { hover: true, tooltipDelay: 80, navigationButtons: false, keyboard: false },
+            nodes: { borderWidth: 1, borderWidthSelected: 2 },
+            edges: { smooth: { type: "curvedCW", roundness: 0.2 } },
+            background: { fill: "transparent" },
+          }
         );
         setGraphLoading(false);
       };
       let _att = 0;
       const _poll = setInterval(() => {
         _att++;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         if ((window as any).vis) { clearInterval(_poll); _draw(); }
         else if (_att > 30) { clearInterval(_poll); setError("描画失敗"); setGraphLoading(false); }
@@ -209,6 +233,7 @@ export default function DiagnosisPage() {
     {id:"execution",label:"📋 実行計画",flag:"diag_execution"},
     {id:"investment",label:"📈 投資シグナル",flag:"diag_investment"},
     {id:"graph",label:"📊 会話の可視化",flag:"diag_graph"},
+    {id:"file",label:"🧾 ファイル診断",flag:"diag_file"},
   ];
   const TABS = allTabs.filter(t=>!t.flag || features[t.flag] !== false);
 
@@ -1022,30 +1047,88 @@ export default function DiagnosisPage() {
         )}
         {tab==="graph" && (
           <div className="space-y-4">
-            <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",boxShadow:C.shadow}} className="p-5">
-              <p className="text-sm font-bold mb-2" style={{color:C.textMain}}>📊 会話ネットワーク可視化</p>
-              <p className="text-xs mb-3" style={{color:C.textSub}}>直近のチャット履歴を会話グラフとして可視化します。ノードをドラッグして動かせます。</p>
-              <button onClick={fetchGraphData} disabled={graphLoading}
-                style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,borderRadius:"12px",padding:"10px 24px",border:"none",cursor:"pointer",boxShadow:"0 4px 12px rgba(79,70,229,0.3)",opacity:graphLoading?0.7:1,marginBottom:"16px",display:"inline-block"}}
-                className="text-white font-bold text-sm hover:opacity-90 transition-all disabled:cursor-not-allowed">
-                {graphLoading ? "生成中..." : "📊 会話グラフを生成"}
-              </button>
+            {/* ヘッダーカード */}
+            <div style={{background:"linear-gradient(135deg,#0f0c29,#302b63,#24243e)",borderRadius:"20px",boxShadow:"0 8px 32px rgba(99,102,241,0.25)",overflow:"hidden"}}>
+              <div style={{padding:"20px 24px 16px"}}>
+                <p style={{color:"rgba(255,255,255,0.35)",fontSize:"9px",letterSpacing:"0.2em",fontWeight:700,marginBottom:"6px"}}>CONVERSATION INTELLIGENCE</p>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 style={{color:"white",fontWeight:900,fontSize:"17px",marginBottom:"3px"}}>会話構造マップ</h2>
+                    <p style={{color:"rgba(255,255,255,0.38)",fontSize:"11px"}}>相談の思考連鎖とトピック分布を可視化します</p>
+                  </div>
+                  <button onClick={fetchGraphData} disabled={graphLoading}
+                    style={{background:graphLoading?"rgba(255,255,255,0.1)":"linear-gradient(135deg,#6366f1,#8b5cf6)",borderRadius:"12px",padding:"9px 20px",border:"1px solid rgba(255,255,255,0.15)",cursor:graphLoading?"not-allowed":"pointer",boxShadow:graphLoading?"none":"0 4px 16px rgba(99,102,241,0.4)",flexShrink:0,color:"white",fontWeight:700,fontSize:"12px",transition:"all 0.2s"}}>
+                    {graphLoading ? "解析中..." : "マップを生成"}
+                  </button>
+                </div>
+              </div>
+              {/* トピック凡例 */}
+              {graphData && (
+                <div style={{borderTop:"1px solid rgba(255,255,255,0.08)",padding:"10px 24px",display:"flex",flexWrap:"wrap" as const,gap:"8px"}}>
+                  {[["戦略・競合","#6366f1"],["集客・SNS","#0891b2"],["売上・財務","#059669"],["組織・人材","#d97706"],["投資・株","#dc2626"],["診断・分析","#8b5cf6"],["指名・接客","#db2777"],["その他","#475569"]].map(([label,color])=>(
+                    <div key={label} style={{display:"flex",alignItems:"center",gap:"5px"}}>
+                      <div style={{width:"8px",height:"8px",borderRadius:"99px",background:color,boxShadow:`0 0 6px ${color}`}}/>
+                      <span style={{color:"rgba(255,255,255,0.45)",fontSize:"9px",fontWeight:600}}>{label}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* stats */}
+              {graphData && (
+                <div style={{borderTop:"1px solid rgba(255,255,255,0.06)",padding:"10px 24px",display:"flex",gap:"24px"}}>
+                  {[
+                    ["NODES", String(graphData.nodes.length)],
+                    ["CONNECTIONS", String(graphData.edges.length)],
+                    ["TOPICS", String(new Set(graphData.nodes.map((n:any)=>n.group||"その他")).size)],
+                  ].map(([k,v])=>(
+                    <div key={k}>
+                      <p style={{color:"rgba(255,255,255,0.28)",fontSize:"8px",fontWeight:700,letterSpacing:"0.15em"}}>{k}</p>
+                      <p style={{color:"white",fontWeight:900,fontSize:"16px"}}>{v}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* グラフ本体 */}
               {graphLoading && (
-                <div className="text-center py-8">
-                  <div style={{display:"inline-block",width:"32px",height:"32px",border:`3px solid ${C.border}`,borderTop:`3px solid ${C.primary}`,borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
-                  <p className="text-xs mt-3" style={{color:C.textMuted}}>チャット履歴を解析中...</p>
+                <div style={{padding:"48px 0",textAlign:"center" as const}}>
+                  <div style={{display:"inline-block",width:"32px",height:"32px",border:"3px solid rgba(255,255,255,0.1)",borderTop:"3px solid #6366f1",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+                  <p style={{color:"rgba(255,255,255,0.35)",fontSize:"12px",marginTop:"12px"}}>チャット履歴を構造解析中...</p>
                   <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
                 </div>
               )}
               {!graphData && !graphLoading && (
-                <p className="text-xs text-center py-8" style={{color:C.textMuted}}>「会話グラフを生成」を押すと直近チャット履歴を可視化します</p>
+                <div style={{padding:"40px 0",textAlign:"center" as const}}>
+                  <p style={{color:"rgba(255,255,255,0.2)",fontSize:"12px"}}>「マップを生成」を押すと直近のチャット履歴を構造化します</p>
+                </div>
               )}
-              <div ref={graphRef} style={{width:"100%",height:"400px",background:"rgba(0,0,0,0.02)",borderRadius:"12px",border:`1px solid ${C.border}`}}/>
+              <div ref={graphRef} style={{width:"100%",minHeight: graphData ? "480px" : "0px",display: graphData ? "block" : "none"}}/>
             </div>
+            {/* 操作ヒント */}
+            {graphData && (
+              <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"14px",padding:"12px 16px",display:"flex",gap:"16px",flexWrap:"wrap" as const}}>
+                {[["🖱️ ドラッグ","ノードを移動"],["🔍 スクロール","ズームイン/アウト"],["🎯 クリック","ノードを選択"],["◉ 大ノード","中心トピック"]].map(([icon,desc])=>(
+                  <div key={desc} style={{display:"flex",alignItems:"center",gap:"6px"}}>
+                    <span style={{fontSize:"11px"}}>{icon}</span>
+                    <span style={{color:C.textMuted,fontSize:"10px"}}>{desc}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
+        {tab==="file" && (
+          <div className="space-y-4">
+            <div style={{background:"linear-gradient(135deg,#0f172a,#1e293b)",borderRadius:"20px",padding:"20px 24px",boxShadow:"0 8px 32px rgba(99,102,241,0.2)"}}>
+              <p style={{color:"rgba(255,255,255,0.35)",fontSize:"9px",letterSpacing:"0.2em",fontWeight:700,marginBottom:"6px"}}>FILE DIAGNOSIS</p>
+              <h2 style={{color:"white",fontWeight:900,fontSize:"17px",marginBottom:"3px"}}>🧾 ファイル診断</h2>
+              <p style={{color:"rgba(255,255,255,0.38)",fontSize:"11px",marginBottom:"16px"}}>ファイルをアップロードして全タブを横断解析し、構造診断・課題仮説・実行計画を一括生成します</p>
+              <FileDiagnosis C={C} />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
+

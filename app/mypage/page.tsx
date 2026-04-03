@@ -252,44 +252,86 @@ export default function MyPage() {
 
         {/* Decision Metrics */}
         {tab==="metrics" && (
-          <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"24px",boxShadow:C.shadowMd}} className="p-6">
+          <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"24px",boxShadow:C.shadowMd,overflow:"hidden"}}>
             {dm ? (
               <>
-                <div className="flex justify-between items-center mb-6">
-                  <div>
-                    <p style={{color:C.textMuted,fontSize:"10px",letterSpacing:"0.12em",fontWeight:700}} className="mb-1">DIMENSION MATRIX</p>
-                    <h2 className="text-lg font-black" style={{color:C.textMain}}>意思決定精度診断</h2>
-                  </div>
-                  <div style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,borderRadius:"14px",padding:"8px 18px",boxShadow:C.shadowPrimary}}>
-                    <span className="font-black text-white text-xl">{String(dm.diagnosis_rank||"C")}</span>
-                  </div>
-                </div>
-                <div className="space-y-4 mb-6">
-                  {([
-                    ["Q","意思決定精度",dm.decision_quality_score],
-                    ["R","リスク耐性",dm.risk_tolerance],
-                    ["S","構造理解",dm.structural_intelligence],
-                    ["V","判断速度",dm.decision_velocity],
-                    ["P","予測精度",dm.prediction_accuracy],
-                    ["E","実行一貫性",dm.execution_consistency],
-                  ] as [string,string,unknown][]).map(([k,l,v])=>(
-                    <div key={k}>
-                      <div className="flex justify-between items-center mb-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="font-black text-sm" style={{color:C.primary}}>{k}</span>
-                          <span className="text-sm" style={{color:C.textSub}}>{l}</span>
-                        </div>
-                        <span className="font-black text-lg" style={{color:C.textMain}}>{Number(v).toFixed(0)}</span>
-                      </div>
-                      <div style={{background:"rgba(0,0,0,0.06)",borderRadius:"99px",height:"6px"}}>
-                        <div style={{width:`${Math.min(Number(v),100)}%`,background:`linear-gradient(90deg,${C.primary},${C.primary2})`,borderRadius:"99px",height:"6px",transition:"width 0.6s ease"}}/>
-                      </div>
+                {/* ダークヘッダー */}
+                <div style={{background:"linear-gradient(135deg,#0f0c29,#302b63,#24243e)",padding:"24px 24px 20px"}}>
+                  <p style={{color:"rgba(255,255,255,0.35)",fontSize:"9px",letterSpacing:"0.2em",fontWeight:700,marginBottom:"8px"}}>DECISION INTELLIGENCE MATRIX</p>
+                  <div className="flex items-start justify-between" style={{marginBottom:"18px"}}>
+                    <div>
+                      <h2 style={{color:"white",fontWeight:900,fontSize:"18px",marginBottom:"4px"}}>意思決定精度診断</h2>
+                      <p style={{color:"rgba(255,255,255,0.38)",fontSize:"11px",lineHeight:1.5}}>
+                        {Number(dm.diagnosis_total_score||0)>=80?"全指標が高水準で安定しています":Number(dm.diagnosis_total_score||0)>=65?"複数の指標に改善余地があります":Number(dm.diagnosis_total_score||0)>=50?"重点的な強化が必要な指標があります":"判断構造に根本的な課題があります"}
+                      </p>
                     </div>
-                  ))}
+                    <div style={{textAlign:"center" as const,flexShrink:0,marginLeft:"16px"}}>
+                      <div style={{
+                        background:String(dm.diagnosis_rank||"C")==="S"?"linear-gradient(135deg,#f59e0b,#ef4444)":String(dm.diagnosis_rank||"C").startsWith("A")?"linear-gradient(135deg,#6366f1,#8b5cf6)":String(dm.diagnosis_rank||"C").startsWith("B")?"linear-gradient(135deg,#0891b2,#06b6d4)":"linear-gradient(135deg,#6b7280,#9ca3af)",
+                        borderRadius:"14px",padding:"8px 18px",boxShadow:"0 4px 20px rgba(0,0,0,0.4)",minWidth:"56px"
+                      }}>
+                        <span style={{color:"white",fontWeight:900,fontSize:"22px",letterSpacing:"0.05em",display:"block",textAlign:"center" as const}}>{String(dm.diagnosis_rank||"C")}</span>
+                      </div>
+                      <p style={{color:"rgba(255,255,255,0.3)",fontSize:"9px",marginTop:"4px",letterSpacing:"0.12em",textAlign:"center" as const}}>RANK</p>
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center" style={{marginBottom:"6px"}}>
+                    <span style={{color:"rgba(255,255,255,0.4)",fontSize:"10px",fontWeight:600,letterSpacing:"0.12em"}}>TOTAL SCORE</span>
+                    <span style={{color:"white",fontWeight:900,fontSize:"20px"}}>{Number(dm.diagnosis_total_score||0).toFixed(1)}</span>
+                  </div>
+                  <div style={{background:"rgba(255,255,255,0.1)",borderRadius:"99px",height:"4px"}}>
+                    <div style={{
+                      width:`${Math.min(Number(dm.diagnosis_total_score||0),100)}%`,
+                      background:Number(dm.diagnosis_total_score||0)>=80?"linear-gradient(90deg,#059669,#10b981)":Number(dm.diagnosis_total_score||0)>=65?"linear-gradient(90deg,#0891b2,#06b6d4)":Number(dm.diagnosis_total_score||0)>=50?"linear-gradient(90deg,#d97706,#f59e0b)":"linear-gradient(90deg,#dc2626,#ef4444)",
+                      borderRadius:"99px",height:"4px",transition:"width 0.8s ease",
+                      boxShadow:Number(dm.diagnosis_total_score||0)>=80?"0 0 8px rgba(16,185,129,0.7)":Number(dm.diagnosis_total_score||0)>=65?"0 0 8px rgba(6,182,212,0.7)":Number(dm.diagnosis_total_score||0)>=50?"0 0 8px rgba(245,158,11,0.7)":"0 0 8px rgba(239,68,68,0.7)"
+                    }}/>
+                  </div>
                 </div>
-                <div style={{borderTop:`1px solid ${C.border}`,paddingTop:"16px"}} className="flex justify-between items-center">
-                  <span className="font-bold" style={{color:C.primary}}>TOTAL SCORE</span>
-                  <span className="font-black text-3xl" style={{color:C.primary}}>{Number(dm.diagnosis_total_score||0).toFixed(1)}</span>
+                {/* 6指標 */}
+                <div style={{padding:"20px 24px"}} className="space-y-5">
+                  {([
+                    ["Q", dm.label_q||"意思決定精度", dm.decision_quality_score, "構造的思考による判断の質"],
+                    ["R", dm.label_r||"リスク耐性",   dm.risk_tolerance,          "リスクを定量化し許容する能力"],
+                    ["S", dm.label_s||"構造理解",     dm.structural_intelligence, "問題の本質と因果を把握する力"],
+                    ["V", dm.label_v||"判断速度",     dm.decision_velocity,       "適切なスピードで決断する能力"],
+                    ["P", dm.label_p||"予測精度",     dm.prediction_accuracy,     "継続的な利用から算出される精度"],
+                    ["E", dm.label_e||"実行一貫性",   dm.execution_consistency,   "判断と行動の整合性・一貫性"],
+                  ] as [string,string,unknown,string][]).map(([k,l,v,desc])=>{
+                    const val = Number(v);
+                    const gc = val>=80?"linear-gradient(90deg,#059669,#10b981)":val>=65?"linear-gradient(90deg,#0891b2,#06b6d4)":val>=50?"linear-gradient(90deg,#d97706,#f59e0b)":"linear-gradient(90deg,#dc2626,#ef4444)";
+                    const tc = val>=80?"#059669":val>=65?"#0891b2":val>=50?"#d97706":"#dc2626";
+                    const lb = val>=80?"HIGH":val>=65?"MID":val>=50?"LOW":"CRITICAL";
+                    return (
+                      <div key={k}>
+                        <div className="flex items-center justify-between" style={{marginBottom:"7px"}}>
+                          <div className="flex items-center gap-3">
+                            <div style={{width:"30px",height:"30px",borderRadius:"9px",background:`${tc}15`,border:`1.5px solid ${tc}35`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                              <span style={{color:tc,fontWeight:900,fontSize:"12px"}}>{k}</span>
+                            </div>
+                            <div>
+                              <p style={{color:C.textMain,fontWeight:700,fontSize:"13px",lineHeight:1.2}}>{String(l).replace(/^[A-Z] /,"")}</p>
+                              <p style={{color:C.textMuted,fontSize:"10px",marginTop:"1px"}}>{desc}</p>
+                            </div>
+                          </div>
+                          <div style={{textAlign:"right" as const,flexShrink:0,marginLeft:"12px"}}>
+                            <p style={{color:tc,fontWeight:900,fontSize:"18px",lineHeight:1}}>{val.toFixed(0)}</p>
+                            <p style={{color:tc,fontSize:"9px",fontWeight:700,letterSpacing:"0.08em",marginTop:"1px"}}>{lb}</p>
+                          </div>
+                        </div>
+                        <div style={{background:"rgba(0,0,0,0.05)",borderRadius:"99px",height:"5px"}}>
+                          <div style={{width:`${Math.min(val,100)}%`,background:gc,borderRadius:"99px",height:"5px",transition:"width 0.7s ease",boxShadow:`0 0 6px ${tc}55`}}/>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {/* フッター注記 */}
+                <div style={{borderTop:`1px solid ${C.border}`,margin:"0 24px",padding:"14px 0 18px"}}>
+                  <p style={{color:C.textMuted,fontSize:"11px",textAlign:"center" as const,lineHeight:1.7}}>
+                    スコアは直近60件のチャット履歴から算出されます。<br/>
+                    入力の質・継続頻度・語彙の構造性がすべての指標に影響します。
+                  </p>
                 </div>
               </>
             ) : <p className="text-center py-12" style={{color:C.textMuted}}>診断データがありません。チャットを重ねると計算されます。</p>}
