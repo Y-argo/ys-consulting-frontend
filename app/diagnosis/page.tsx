@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 const ReactMarkdown = dynamic(() => import("react-markdown"), { ssr: false, loading: () => null });
 const FileDiagnosis = dynamic(() => import("./FileDiagnosis"), { ssr: false, loading: () => null });
@@ -23,8 +23,9 @@ const C = {
   shadowPrimary:"0 4px 16px rgba(79,70,229,0.2)",
 };
 
-export default function DiagnosisPage() {
+function DiagnosisPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [tab, setTab] = useState<TabId>("diagnosis");
   const graphRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(false);
@@ -55,6 +56,12 @@ export default function DiagnosisPage() {
   const [features, setFeatures] = useState<Record<string,boolean>>({});
 
   useEffect(() => {
+    const urlTab = searchParams.get("tab") as TabId;
+    if (urlTab) {
+      setTab(urlTab);
+      localStorage.setItem("diag_tab", urlTab);
+      return;
+    }
     const savedTab = localStorage.getItem("diag_tab") as TabId;
     if (savedTab) setTab(savedTab);
     if (!getStoredUser()) { router.push("/"); return; }
@@ -254,31 +261,53 @@ export default function DiagnosisPage() {
     if (activeAnalysisType==="structure") return (
       <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",boxShadow:C.shadowMd}} className="p-5 mt-4">
         <p style={{color:C.primary,fontWeight:900,fontSize:"15px",marginBottom:"16px"}}>🏗️ 構造診断レポート</p>
-        {r.summary && <Section title="総合サマリー" color={C.primary}><p style={{color:C.textSub,fontSize:"13px",lineHeight:"1.7"}}>{String(r.summary)}</p></Section>}
-        {Array.isArray(r.structure_layers) && r.structure_layers.length>0 && (
-          <Section title="構造レイヤー分析" color="#0891b2">
-            {(r.structure_layers as {layer:string;content:string;strength:number}[]).map((l,i)=>(
-              <div key={i} style={{borderBottom:`1px solid rgba(0,0,0,0.06)`,paddingBottom:"8px",marginBottom:"8px"}}>
-                <div className="flex justify-between items-center mb-1">
-                  <span style={{color:"#0891b2",fontWeight:700,fontSize:"12px"}}>{l.layer}</span>
-                  <span style={{color:C.textMuted,fontSize:"11px"}}>強度 {Math.round((l.strength||0)*100)}%</span>
-                </div>
-                <div style={{background:"rgba(0,0,0,0.04)",borderRadius:"99px",height:"4px",marginBottom:"6px"}}>
-                  <div style={{width:`${Math.round((l.strength||0)*100)}%`,background:"linear-gradient(90deg,#0891b2,#06b6d4)",borderRadius:"99px",height:"4px"}}/>
-                </div>
-                <p style={{color:C.textSub,fontSize:"12px"}}>{l.content}</p>
+        {r.issue_summary && <Section title="問題サマリー" color={C.primary}><p style={{color:C.textSub,fontSize:"13px",lineHeight:"1.7"}}>{String(r.issue_summary)}</p></Section>}
+        {Array.isArray(r.observations) && r.observations.length>0 && (
+          <Section title="観測事実" color="#0891b2">
+            {(r.observations as string[]).map((o,i)=>(
+              <div key={i} className="flex items-start gap-2 mb-1">
+                <span style={{color:"#0891b2",fontWeight:700,fontSize:"12px"}}>▸</span>
+                <p style={{color:C.textSub,fontSize:"12px"}}>{o}</p>
               </div>
             ))}
           </Section>
         )}
-        {r.key_bottleneck && <Section title="🚨 主要ボトルネック" color="#dc2626"><p style={{color:"#dc2626",fontSize:"13px",fontWeight:600}}>{String(r.key_bottleneck)}</p></Section>}
-        {r.recommended_framework && <Section title="📐 推奨フレームワーク" color="#7c3aed"><p style={{color:C.textSub,fontSize:"13px"}}>{String(r.recommended_framework)}</p></Section>}
-        {Array.isArray(r.next_actions) && r.next_actions.length>0 && (
-          <Section title="⚡ 次のアクション" color="#059669">
-            {(r.next_actions as string[]).map((a,i)=>(
+        {Array.isArray(r.root_causes) && r.root_causes.length>0 && (
+          <Section title="🔍 根因" color="#dc2626">
+            {(r.root_causes as string[]).map((c,i)=>(
+              <div key={i} className="flex items-start gap-2 mb-1">
+                <span style={{color:"#dc2626",fontWeight:700,fontSize:"12px"}}>{i+1}.</span>
+                <p style={{color:C.textSub,fontSize:"12px"}}>{c}</p>
+              </div>
+            ))}
+          </Section>
+        )}
+        {Array.isArray(r.constraints) && r.constraints.length>0 && (
+          <Section title="⚠️ 制約条件" color="#d97706">
+            {(r.constraints as string[]).map((c,i)=>(
+              <div key={i} className="flex items-start gap-2 mb-1">
+                <span style={{color:"#d97706",fontSize:"12px"}}>■</span>
+                <p style={{color:C.textSub,fontSize:"12px"}}>{c}</p>
+              </div>
+            ))}
+          </Section>
+        )}
+        {Array.isArray(r.recommended_actions) && r.recommended_actions.length>0 && (
+          <Section title="⚡ 推奨アクション（優先度順）" color="#059669">
+            {(r.recommended_actions as string[]).map((a,i)=>(
               <div key={i} className="flex items-start gap-2 mb-2">
                 <span style={{color:"#059669",fontWeight:700,fontSize:"12px",minWidth:"20px"}}>{i+1}.</span>
                 <p style={{color:C.textSub,fontSize:"12px"}}>{a}</p>
+              </div>
+            ))}
+          </Section>
+        )}
+        {Array.isArray(r.risks) && r.risks.length>0 && (
+          <Section title="🚨 リスク" color="#dc2626">
+            {(r.risks as string[]).map((rk,i)=>(
+              <div key={i} className="flex items-start gap-2 mb-1">
+                <span style={{color:"#dc2626",fontSize:"12px"}}>▸</span>
+                <p style={{color:C.textSub,fontSize:"12px"}}>{rk}</p>
               </div>
             ))}
           </Section>
@@ -290,27 +319,42 @@ export default function DiagnosisPage() {
     if (activeAnalysisType==="issue") return (
       <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",boxShadow:C.shadowMd}} className="p-5 mt-4">
         <p style={{color:C.primary,fontWeight:900,fontSize:"15px",marginBottom:"16px"}}>🎯 課題仮説レポート</p>
-        {r.root_cause && <Section title="根本原因" color="#dc2626"><p style={{color:"#dc2626",fontSize:"13px",fontWeight:600}}>{String(r.root_cause)}</p></Section>}
-        {Array.isArray(r.hypotheses) && r.hypotheses.length>0 && (
-          <Section title="課題仮説一覧" color={C.primary}>
-            {(r.hypotheses as {hypothesis:string;priority:string;evidence:string;verification:string}[]).map((h,i)=>(
-              <div key={i} style={{borderBottom:`1px solid rgba(0,0,0,0.06)`,paddingBottom:"10px",marginBottom:"10px"}}>
-                <div className="flex items-center gap-2 mb-1">
-                  <Tag label={h.priority==="high"?"🔴 高":h.priority==="mid"?"🟡 中":"🟢 低"} color={h.priority==="high"?"#dc2626":h.priority==="mid"?"#d97706":"#059669"}/>
-                  <p style={{color:C.textMain,fontWeight:600,fontSize:"13px"}}>{h.hypothesis}</p>
-                </div>
-                <p style={{color:C.textMuted,fontSize:"11px"}}>根拠: {h.evidence}</p>
-                <p style={{color:C.textMuted,fontSize:"11px"}}>検証: {h.verification}</p>
+        {Array.isArray(r.main_issues) && r.main_issues.length>0 && (
+          <Section title="主要論点" color={C.primary}>
+            {(r.main_issues as string[]).map((issue,i)=>(
+              <div key={i} className="flex items-start gap-2 mb-1">
+                <span style={{color:C.primary,fontWeight:700,fontSize:"12px"}}>{i+1}.</span>
+                <p style={{color:C.textSub,fontSize:"12px"}}>{issue}</p>
               </div>
             ))}
           </Section>
         )}
-        {Array.isArray(r.quick_wins) && r.quick_wins.length>0 && (
-          <Section title="⚡ 即効策" color="#059669">
-            {(r.quick_wins as string[]).map((a,i)=>(
+        {Array.isArray(r.hypotheses) && r.hypotheses.length>0 && (
+          <Section title="課題仮説" color="#7c3aed">
+            {(r.hypotheses as string[]).map((h,i)=>(
+              <div key={i} className="flex items-start gap-2 mb-2">
+                <span style={{color:"#7c3aed",fontWeight:700,fontSize:"12px",minWidth:"20px"}}>{i+1}.</span>
+                <p style={{color:C.textSub,fontSize:"12px"}}>{h}</p>
+              </div>
+            ))}
+          </Section>
+        )}
+        {Array.isArray(r.questions_to_verify) && r.questions_to_verify.length>0 && (
+          <Section title="✅ 次に確認すべき質問" color="#059669">
+            {(r.questions_to_verify as string[]).map((q,i)=>(
               <div key={i} className="flex items-start gap-2 mb-1">
-                <span style={{color:"#059669",fontWeight:700,fontSize:"12px"}}>✓</span>
-                <p style={{color:C.textSub,fontSize:"12px"}}>{a}</p>
+                <span style={{color:"#059669",fontSize:"12px"}}>Q{i+1}.</span>
+                <p style={{color:C.textSub,fontSize:"12px"}}>{q}</p>
+              </div>
+            ))}
+          </Section>
+        )}
+        {Array.isArray(r.decision_points) && r.decision_points.length>0 && (
+          <Section title="🎯 意思決定ポイント" color="#d97706">
+            {(r.decision_points as string[]).map((d,i)=>(
+              <div key={i} className="flex items-start gap-2 mb-1">
+                <span style={{color:"#d97706",fontWeight:700,fontSize:"12px"}}>▸</span>
+                <p style={{color:C.textSub,fontSize:"12px"}}>{d}</p>
               </div>
             ))}
           </Section>
@@ -323,34 +367,28 @@ export default function DiagnosisPage() {
       <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",boxShadow:C.shadowMd}} className="p-5 mt-4">
         <p style={{color:C.primary,fontWeight:900,fontSize:"15px",marginBottom:"16px"}}>⚖️ 比較分析レポート</p>
         {Array.isArray(r.options) && r.options.length>0 && (
-          <div style={{overflowX:"auto",marginBottom:"16px"}}>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px"}}>
-              <thead>
-                <tr>
-                  {["選択肢","コスト","リスク","効果","実現性","速度","総評"].map(h=>(
-                    <th key={h} style={{background:`${C.primary}10`,border:`1px solid ${C.border}`,padding:"8px",color:C.primary,fontWeight:700,whiteSpace:"nowrap"}}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {(r.options as {name:string;scores:{cost:number;risk:number;effect:number;feasibility:number;speed:number};summary:string}[]).map((opt,i)=>(
-                  <tr key={i} style={{background:i%2===0?"transparent":"rgba(0,0,0,0.02)"}}>
-                    <td style={{border:`1px solid ${C.border}`,padding:"8px",fontWeight:600,color:C.textMain}}>{opt.name}</td>
-                    {["cost","risk","effect","feasibility","speed"].map(k=>(
-                      <td key={k} style={{border:`1px solid ${C.border}`,padding:"8px",textAlign:"center"}}>
-                        <span style={{color:Number(opt.scores[k as keyof typeof opt.scores])>=75?"#059669":Number(opt.scores[k as keyof typeof opt.scores])>=50?"#d97706":"#dc2626",fontWeight:700}}>
-                          {opt.scores[k as keyof typeof opt.scores]}
-                        </span>
-                      </td>
-                    ))}
-                    <td style={{border:`1px solid ${C.border}`,padding:"8px",color:C.textSub,fontSize:"11px"}}>{opt.summary}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div style={{marginBottom:"16px"}}>
+            {(r.options as {name:string;scores:Record<string,number>;pros:string[];cons:string[];recommended_for:string[]}[]).map((opt,i)=>(
+              <div key={i} style={{border:`1px solid ${C.border}`,borderRadius:"12px",marginBottom:"10px",overflow:"hidden"}}>
+                <div style={{background:`linear-gradient(135deg,${C.primary}15,${C.primary2}08)`,padding:"10px 14px",borderBottom:`1px solid ${C.border}`}}>
+                  <span style={{color:C.primary,fontWeight:700,fontSize:"13px"}}>{opt.name}</span>
+                </div>
+                <div style={{padding:"10px 14px"}}>
+                  {Object.entries(opt.scores||{}).length>0 && (
+                    <div style={{display:"flex",flexWrap:"wrap",gap:"6px",marginBottom:"8px"}}>
+                      {Object.entries(opt.scores).map(([k,v])=>(
+                        <span key={k} style={{background:`${C.primary}10`,border:`1px solid ${C.border}`,borderRadius:"8px",padding:"2px 8px",fontSize:"11px",color:C.textSub}}>{k}: <b style={{color:Number(v)>=4?"#059669":Number(v)>=3?"#d97706":"#dc2626"}}>{v}</b>/5</span>
+                      ))}
+                    </div>
+                  )}
+                  {Array.isArray(opt.pros) && opt.pros.length>0 && <p style={{color:"#059669",fontSize:"11px",marginBottom:"2px"}}>✓ {opt.pros.join("　")}</p>}
+                  {Array.isArray(opt.cons) && opt.cons.length>0 && <p style={{color:"#dc2626",fontSize:"11px"}}>✗ {opt.cons.join("　")}</p>}
+                </div>
+              </div>
+            ))}
           </div>
         )}
-        {r.recommendation && <Section title="✅ 推奨選択肢" color="#059669"><p style={{color:"#059669",fontWeight:700,fontSize:"14px"}}>{String(r.recommendation)}</p><p style={{color:C.textSub,fontSize:"12px",marginTop:"4px"}}>{String(r.rationale||"")}</p></Section>}
+        {r.final_recommendation && <Section title="✅ 最終推奨" color="#059669"><p style={{color:"#059669",fontWeight:700,fontSize:"13px"}}>{String(r.final_recommendation)}</p></Section>}
       </div>
     );
 
@@ -370,13 +408,12 @@ export default function DiagnosisPage() {
         )}
         {Array.isArray(r.contradictions) && r.contradictions.length>0 && (
           <Section title="検出された矛盾" color="#dc2626">
-            {(r.contradictions as {point:string;severity:string;resolution:string}[]).map((c,i)=>(
+            {(r.contradictions as {type:string;description:string;why_problematic:string;fix_direction:string}[]).map((c,i)=>(
               <div key={i} style={{borderBottom:`1px solid rgba(0,0,0,0.06)`,paddingBottom:"10px",marginBottom:"10px"}}>
-                <div className="flex items-center gap-2 mb-1">
-                  <Tag label={c.severity==="high"?"🔴 深刻":c.severity==="mid"?"🟡 中程度":"🟢 軽微"} color={c.severity==="high"?"#dc2626":c.severity==="mid"?"#d97706":"#059669"}/>
-                </div>
-                <p style={{color:C.textMain,fontWeight:600,fontSize:"13px",marginBottom:"4px"}}>{c.point}</p>
-                <p style={{color:C.textMuted,fontSize:"11px"}}>解決策: {c.resolution}</p>
+                {c.type && <span style={{background:"#dc262615",border:"1px solid #dc262640",color:"#dc2626",borderRadius:"99px",padding:"2px 10px",fontSize:"11px",fontWeight:600,display:"inline-block",marginBottom:"6px"}}>{c.type}</span>}
+                <p style={{color:C.textMain,fontWeight:600,fontSize:"13px",marginBottom:"4px"}}>{c.description}</p>
+                {c.why_problematic && <p style={{color:C.textMuted,fontSize:"11px",marginBottom:"2px"}}>問題点: {c.why_problematic}</p>}
+                {c.fix_direction && <p style={{color:"#059669",fontSize:"11px"}}>修正方向: {c.fix_direction}</p>}
               </div>
             ))}
           </Section>
@@ -389,41 +426,24 @@ export default function DiagnosisPage() {
     if (activeAnalysisType==="execution") return (
       <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",boxShadow:C.shadowMd}} className="p-5 mt-4">
         <p style={{color:C.primary,fontWeight:900,fontSize:"15px",marginBottom:"16px"}}>📋 実行計画レポート</p>
-        {Array.isArray(r.phases) && r.phases.length>0 && (
+        {Array.isArray(r.action_plan) && r.action_plan.length>0 && (
           <div style={{marginBottom:"16px"}}>
-            {(r.phases as {phase:string;duration:string;actions:string[];kpi:string;risks:string[]}[]).map((p,i)=>(
+            {(r.action_plan as {task:string;owner:string;deadline:string;kpi:string;priority:string}[]).map((p,i)=>(
               <div key={i} style={{border:`1px solid ${C.border}`,borderRadius:"12px",marginBottom:"10px",overflow:"hidden"}}>
-                <div style={{background:`linear-gradient(135deg,${C.primary}15,${C.primary2}08)`,padding:"10px 14px",borderBottom:`1px solid ${C.border}`}}>
+                <div style={{background:`linear-gradient(135deg,${p.priority==="high"?"#dc262615":"#d9780615"},${C.primary}08)`,padding:"10px 14px",borderBottom:`1px solid ${C.border}`}}>
                   <div className="flex justify-between items-center">
-                    <span style={{color:C.primary,fontWeight:700,fontSize:"13px"}}>Phase {i+1}: {p.phase}</span>
-                    <span style={{color:C.textMuted,fontSize:"11px"}}>📅 {p.duration}</span>
+                    <span style={{color:C.textMain,fontWeight:700,fontSize:"13px"}}>{i+1}. {p.task}</span>
+                    <span style={{color:p.priority==="high"?"#dc2626":p.priority==="medium"?"#d97706":"#059669",fontSize:"11px",fontWeight:700}}>{p.priority==="high"?"🔴 高":p.priority==="medium"?"🟡 中":"🟢 低"}</span>
                   </div>
                 </div>
                 <div style={{padding:"10px 14px"}}>
-                  <p style={{color:C.textMuted,fontSize:"11px",fontWeight:600,marginBottom:"4px"}}>アクション</p>
-                  {(p.actions||[]).map((a,j)=>(
-                    <div key={j} className="flex items-start gap-2 mb-1">
-                      <span style={{color:C.primary,fontSize:"11px",minWidth:"16px"}}>▶</span>
-                      <p style={{color:C.textSub,fontSize:"12px"}}>{a}</p>
-                    </div>
-                  ))}
-                  {p.kpi && <p style={{color:"#059669",fontSize:"12px",marginTop:"6px"}}>📊 KPI: {p.kpi}</p>}
-                  {Array.isArray(p.risks) && p.risks.length>0 && <p style={{color:"#dc2626",fontSize:"12px",marginTop:"4px"}}>⚠️ リスク: {p.risks.join("、")}</p>}
+                  {p.owner && <p style={{color:C.textSub,fontSize:"12px",marginBottom:"2px"}}>👤 担当: {p.owner}</p>}
+                  {p.deadline && <p style={{color:C.textSub,fontSize:"12px",marginBottom:"2px"}}>📅 期限: {p.deadline}</p>}
+                  {p.kpi && <p style={{color:"#059669",fontSize:"12px"}}>📊 KPI: {p.kpi}</p>}
                 </div>
               </div>
             ))}
           </div>
-        )}
-        {r.critical_path && <Section title="🎯 クリティカルパス" color="#d97706"><p style={{color:C.textSub,fontSize:"13px"}}>{String(r.critical_path)}</p></Section>}
-        {Array.isArray(r.success_criteria) && r.success_criteria.length>0 && (
-          <Section title="✅ 成功条件" color="#059669">
-            {(r.success_criteria as string[]).map((s,i)=>(
-              <div key={i} className="flex items-start gap-2 mb-1">
-                <span style={{color:"#059669",fontWeight:700,fontSize:"12px"}}>✓</span>
-                <p style={{color:C.textSub,fontSize:"12px"}}>{s}</p>
-              </div>
-            ))}
-          </Section>
         )}
       </div>
     );
@@ -1132,3 +1152,11 @@ export default function DiagnosisPage() {
   );
 }
 
+import { Suspense } from "react";
+export default function DiagnosisPageWrapper() {
+  return (
+    <Suspense fallback={null}>
+      <DiagnosisPageInner />
+    </Suspense>
+  );
+}

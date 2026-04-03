@@ -903,7 +903,7 @@ export default function ChatPage() {
                     const _txt = (_lastUser?.content||"").toLowerCase();
                     const _hasFile = !!_lastUser?.attachment||["pdf","excel","csv","スプレッドシート","ファイル","xlsx"].some(w=>_txt.includes(w));
                     const _hasImgGen = ["イラスト","ロゴ","バナー","アイコン","illustration","生成して","描いて","作って"].some(w=>_txt.includes(w)) && !["解析","分析","読んで"].some(w=>_txt.includes(w));
-                    const _hasImgAnalyze = !!_lastUser?.images?.length || ["解析","分析","読んで"].some(w=>_txt.includes(w));
+                    const _hasImgAnalyze = !!_lastUser?.images?.length;
                     const _steps = _hasFile
                       ? ["ファイルを受信中...","内容を解析中...","構造を把握中...","インサイトを生成中...","回答を構築中...","最終調整中..."]
                       : _hasImgAnalyze
