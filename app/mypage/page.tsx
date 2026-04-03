@@ -31,6 +31,7 @@ export default function MyPage() {
   const [customPromptSaved, setCustomPromptSaved] = useState(false);
   const [ultraEnabled, setUltraEnabled] = useState(false);
   const [apexEnabled, setApexEnabled] = useState(false);
+  const [features, setFeatures] = useState<Record<string,boolean>>({});
   const [headerCfg, setHeaderCfg] = useState<Record<string,string>>({});
   const [inquiryUnread, setInquiryUnread] = useState(0);
   const [theme, setTheme] = useState<ThemeConfig|null>(null);
@@ -52,7 +53,7 @@ export default function MyPage() {
     if (!user) { router.push("/"); return; }
     setUid(user.uid);
     getUserStats().then(setStats);
-    getMyFeatures().then(f=>{ setUltraEnabled(!!f.ascend_ultra); setApexEnabled(!!f.ascend_apex); });
+    getMyFeatures().then(f=>{ setUltraEnabled(!!f.ascend_ultra); setApexEnabled(!!f.ascend_apex); setFeatures(f); });
     getFcReport().then(setFcData);
     getCustomPrompt().then(d=>{ setCustomPrompt(d.custom_sys_prompt||""); setCustomPromptMode(d.custom_prompt_mode||"append"); });
     getHeaderConfig().then(setHeaderCfg);
@@ -211,9 +212,15 @@ export default function MyPage() {
                 }
               </div>
               <p className="text-xs" style={{color:C.textMuted}}>累計 {stats.total_chat_count} チャット / 12回ごとに生成</p>
-              {stats.diag_available && (
-                <button onClick={()=>router.push("/diagnosis")} style={{background:"linear-gradient(135deg,#10b981,#059669)",borderRadius:"12px",boxShadow:"0 4px 12px rgba(16,185,129,0.3)"}} className="w-full mt-3 text-white font-bold py-2 text-sm hover:opacity-90 transition-all">診断を実行する →</button>
-              )}
+              <button onClick={()=>router.push("/diagnosis")} style={{background:stats.diag_available?"linear-gradient(135deg,#10b981,#059669)":"linear-gradient(135deg,#4f46e5,#7c3aed)",borderRadius:"12px",boxShadow:stats.diag_available?"0 4px 12px rgba(16,185,129,0.3)":"0 4px 12px rgba(79,70,229,0.3)"}} className="w-full mt-3 text-white font-bold py-2 text-sm hover:opacity-90 transition-all">{stats.diag_available?"🔬 診断レポートを生成 →":"📊 診断・分析ページへ →"}</button>
+              <div style={{display:"flex",gap:"6px",flexWrap:"wrap",marginTop:"8px"}}>
+                {([["🔬","現状課題診断","diagnosis",true],["🏗️","構造診断","structure",features.diag_structure!==false],["🎯","課題仮説","issue",features.diag_issue!==false],["⚖️","比較分析","comparison",features.diag_comparison!==false],["⚡","矛盾検知","contradiction",features.diag_contradiction!==false],["📋","実行計画","execution",features.diag_execution!==false],["📈","投資シグナル","investment",features.diag_investment===true],["📊","会話の可視化","graph",features.diag_graph!==false],["🧾","ファイル診断","file",features.diag_file!==false]] as [string,string,string,boolean][]).map(([icon,label,tab,enabled])=>(
+                  <button key={tab} onClick={()=>{
+                    if(!enabled){alert("この機能は現在ご利用いただけません。\nYs Consulting Officeにご連絡ください。");return;}
+                    router.push(`/diagnosis?tab=${tab}`);
+                  }} style={{background:enabled?"linear-gradient(135deg,rgba(99,102,241,0.35),rgba(139,92,246,0.35))":"rgba(100,100,100,0.06)",border:enabled?"1px solid rgba(139,92,246,0.7)":"1px solid rgba(100,100,100,0.15)",borderRadius:"8px",padding:"4px 10px",color:enabled?"#ffffff":"rgba(150,150,150,0.5)",fontSize:"11px",fontWeight:enabled?"700":"400",cursor:enabled?"pointer":"default",whiteSpace:"nowrap",opacity:enabled?1:0.4,boxShadow:enabled?"0 0 8px rgba(139,92,246,0.3)":"none"}}>{icon} {label}</button>
+                ))}
+              </div>
             </div>
 
             {/* 固定概念レポート */}
