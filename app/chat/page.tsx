@@ -745,8 +745,9 @@ export default function ChatPage() {
                                   <div style={{display:"flex",flexWrap:"wrap" as const,gap:"4px"}}>
                                     {([["🏗️","構造診断","structure","事業・組織の構造を解剖しボトルネックを特定"],["🎯","課題仮説","issue","状況から課題仮説を優先度付きで生成"],["⚖️","比較分析","comparison","複数案を多軸で客観比較し推奨案を提示"],["⚡","矛盾検知","contradiction","戦略・方針間の矛盾と整合性を検証"],["📋","実行計画","execution","フェーズ別・期限付きアクションプランを生成"]] as [string,string,string,string][]).map(([icon,label,tab,desc])=>(
                                       <button key={tab} onClick={()=>{
-                                        const _input = encodeURIComponent([_s.summary,"\n\n【現状】\n"+(_s.cards?.current||[]).join("\n"),"\n\n【問題・リスク】\n"+(_s.cards?.risk||[]).join("\n"),"\n\n【推奨方針】\n"+(_s.cards?.plan||[]).join("\n")].join(""));
-                                        window.location.href="/diagnosis?tab="+tab+"&input="+_input;
+                                        const _inputText = [_s.summary,"\n\n【現状】\n"+(_s.cards?.current||[]).join("\n"),"\n\n【問題・リスク】\n"+(_s.cards?.risk||[]).join("\n"),"\n\n【推奨方針】\n"+(_s.cards?.plan||[]).join("\n")].join("");
+                                        try{sessionStorage.setItem("diag_input_"+tab, _inputText);}catch(_e){}
+                                        window.location.href="/diagnosis?tab="+tab;
                                       }}
                                         title={desc}
                                         style={{background:"rgba(79,70,229,0.1)",border:"1px solid rgba(79,70,229,0.25)",borderRadius:"8px",padding:"4px 10px",color:"#6366f1",fontSize:"10px",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap" as const,display:"flex",flexDirection:"column" as const,alignItems:"flex-start" as const,gap:"1px"}}>

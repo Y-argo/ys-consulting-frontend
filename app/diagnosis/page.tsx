@@ -57,15 +57,22 @@ function DiagnosisPageInner() {
 
   useEffect(() => {
     const urlTab = searchParams.get("tab") as TabId;
-    const urlInput = searchParams.get("input");
     if (urlTab) {
       setTab(urlTab);
       localStorage.setItem("diag_tab", urlTab);
-      if (urlInput) {
-        const decoded = decodeURIComponent(urlInput);
-        setInputMap(m => ({...m, [urlTab]: decoded}));
-        setInput(urlTab, decoded);
-      }
+      try {
+        const _stored = sessionStorage.getItem("diag_input_"+urlTab);
+        if (_stored) {
+          sessionStorage.removeItem("diag_input_"+urlTab);
+          if (urlTab === "comparison") {
+            setOptions(_stored);
+          } else if (urlTab === "contradiction") {
+            setStrategy(_stored);
+          } else {
+            setInputMap(m => ({...m, [urlTab]: _stored}));
+          }
+        }
+      } catch(_e) {}
       return;
     }
     const savedTab = localStorage.getItem("diag_tab") as TabId;
