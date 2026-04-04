@@ -57,9 +57,15 @@ function DiagnosisPageInner() {
 
   useEffect(() => {
     const urlTab = searchParams.get("tab") as TabId;
+    const urlInput = searchParams.get("input");
     if (urlTab) {
       setTab(urlTab);
       localStorage.setItem("diag_tab", urlTab);
+      if (urlInput) {
+        const decoded = decodeURIComponent(urlInput);
+        setInputMap(m => ({...m, [urlTab]: decoded}));
+        setInput(urlTab, decoded);
+      }
       return;
     }
     const savedTab = localStorage.getItem("diag_tab") as TabId;
@@ -272,12 +278,32 @@ function DiagnosisPageInner() {
             ))}
           </Section>
         )}
+        {Array.isArray(r.surface_causes) && r.surface_causes.length>0 && (
+          <Section title="🔎 表層原因" color="#d97706">
+            {(r.surface_causes as string[]).map((c,i)=>(
+              <div key={i} className="flex items-start gap-2 mb-1">
+                <span style={{color:"#d97706",fontWeight:700,fontSize:"12px"}}>{i+1}.</span>
+                <p style={{color:C.textSub,fontSize:"12px"}}>{c}</p>
+              </div>
+            ))}
+          </Section>
+        )}
         {Array.isArray(r.root_causes) && r.root_causes.length>0 && (
           <Section title="🔍 根因" color="#dc2626">
             {(r.root_causes as string[]).map((c,i)=>(
               <div key={i} className="flex items-start gap-2 mb-1">
                 <span style={{color:"#dc2626",fontWeight:700,fontSize:"12px"}}>{i+1}.</span>
                 <p style={{color:C.textSub,fontSize:"12px"}}>{c}</p>
+              </div>
+            ))}
+          </Section>
+        )}
+        {Array.isArray(r.priority_points) && r.priority_points.length>0 && (
+          <Section title="🎯 優先論点" color="#7c3aed">
+            {(r.priority_points as string[]).map((p,i)=>(
+              <div key={i} className="flex items-start gap-2 mb-1">
+                <span style={{color:"#7c3aed",fontWeight:700,fontSize:"12px"}}>{i+1}.</span>
+                <p style={{color:C.textSub,fontSize:"12px"}}>{p}</p>
               </div>
             ))}
           </Section>
@@ -308,6 +334,16 @@ function DiagnosisPageInner() {
               <div key={i} className="flex items-start gap-2 mb-1">
                 <span style={{color:"#dc2626",fontSize:"12px"}}>▸</span>
                 <p style={{color:C.textSub,fontSize:"12px"}}>{rk}</p>
+              </div>
+            ))}
+          </Section>
+        )}
+        {Array.isArray(r.missing_information) && r.missing_information.length>0 && (
+          <Section title="❓ 不足情報" color="#6b7280">
+            {(r.missing_information as string[]).map((m,i)=>(
+              <div key={i} className="flex items-start gap-2 mb-1">
+                <span style={{color:"#6b7280",fontSize:"12px"}}>?</span>
+                <p style={{color:C.textSub,fontSize:"12px"}}>{m}</p>
               </div>
             ))}
           </Section>

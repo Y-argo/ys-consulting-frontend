@@ -739,6 +739,36 @@ export default function ChatPage() {
                                     </div>
                                   </div>
                                 )}
+                                {/* 診断ページ連携 */}
+                                <div style={{borderTop:`1px solid ${C.border}`,paddingTop:"8px"}}>
+                                  <p style={{color:C.textMuted,fontSize:"9px",fontWeight:700,letterSpacing:"0.12em",marginBottom:"5px"}}>🔬 診断ページで深掘り</p>
+                                  <div style={{display:"flex",flexWrap:"wrap" as const,gap:"4px"}}>
+                                    {([["🏗️","構造診断","structure"],["🎯","課題仮説","issue"],["⚖️","比較分析","comparison"],["⚡","矛盾検知","contradiction"],["📋","実行計画","execution"]] as [string,string,string][]).map(([icon,label,tab])=>(
+                                      <button key={tab} onClick={()=>{
+                                        const _input = encodeURIComponent([_s.summary,"\n\n【現状】\n"+(_s.cards?.current||[]).join("\n"),"\n\n【問題・リスク】\n"+(_s.cards?.risk||[]).join("\n"),"\n\n【推奨方針】\n"+(_s.cards?.plan||[]).join("\n")].join(""));
+                                        window.location.href="/diagnosis?tab="+tab+"&input="+_input;
+                                      }}
+                                        style={{background:"rgba(79,70,229,0.1)",border:"1px solid rgba(79,70,229,0.25)",borderRadius:"99px",padding:"3px 10px",color:"#6366f1",fontSize:"10px",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap" as const}}>
+                                        {icon} {label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                                {/* 診断ページ連携 */}
+                                <div style={{borderTop:`1px solid ${C.border}`,paddingTop:"8px"}}>
+                                  <p style={{color:C.textMuted,fontSize:"9px",fontWeight:700,letterSpacing:"0.12em",marginBottom:"5px"}}>🔬 診断ページで深掘り</p>
+                                  <div style={{display:"flex",flexWrap:"wrap" as const,gap:"4px"}}>
+                                    {([["🏗️","構造診断","structure"],["🎯","課題仮説","issue"],["⚖️","比較分析","comparison"],["⚡","矛盾検知","contradiction"],["📋","実行計画","execution"]] as [string,string,string][]).map(([icon,label,tab])=>(
+                                      <button key={tab} onClick={()=>{
+                                        const _input = encodeURIComponent([_s.summary,"\n\n【現状】\n"+(_s.cards?.current||[]).join("\n"),"\n\n【問題・リスク】\n"+(_s.cards?.risk||[]).join("\n"),"\n\n【推奨方針】\n"+(_s.cards?.plan||[]).join("\n")].join(""));
+                                        window.location.href="/diagnosis?tab="+tab+"&input="+_input;
+                                      }}
+                                        style={{background:"rgba(79,70,229,0.1)",border:"1px solid rgba(79,70,229,0.25)",borderRadius:"99px",padding:"3px 10px",color:"#6366f1",fontSize:"10px",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap" as const}}>
+                                        {icon} {label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
                                 {/* 価値訴求 */}
                                 {_s.value_message && (
                                   <div style={{borderTop:`1px solid ${C.border}`,paddingTop:"7px"}}>
