@@ -743,32 +743,20 @@ export default function ChatPage() {
                                 <div style={{borderTop:`1px solid ${C.border}`,paddingTop:"8px"}}>
                                   <p style={{color:C.textMuted,fontSize:"9px",fontWeight:700,letterSpacing:"0.12em",marginBottom:"5px"}}>🔬 診断ページで深掘り</p>
                                   <div style={{display:"flex",flexWrap:"wrap" as const,gap:"4px"}}>
-                                    {([["🏗️","構造診断","structure"],["🎯","課題仮説","issue"],["⚖️","比較分析","comparison"],["⚡","矛盾検知","contradiction"],["📋","実行計画","execution"]] as [string,string,string][]).map(([icon,label,tab])=>(
+                                    {([["🏗️","構造診断","structure","事業・組織の構造を解剖しボトルネックを特定"],["🎯","課題仮説","issue","状況から課題仮説を優先度付きで生成"],["⚖️","比較分析","comparison","複数案を多軸で客観比較し推奨案を提示"],["⚡","矛盾検知","contradiction","戦略・方針間の矛盾と整合性を検証"],["📋","実行計画","execution","フェーズ別・期限付きアクションプランを生成"]] as [string,string,string,string][]).map(([icon,label,tab,desc])=>(
                                       <button key={tab} onClick={()=>{
                                         const _input = encodeURIComponent([_s.summary,"\n\n【現状】\n"+(_s.cards?.current||[]).join("\n"),"\n\n【問題・リスク】\n"+(_s.cards?.risk||[]).join("\n"),"\n\n【推奨方針】\n"+(_s.cards?.plan||[]).join("\n")].join(""));
                                         window.location.href="/diagnosis?tab="+tab+"&input="+_input;
                                       }}
-                                        style={{background:"rgba(79,70,229,0.1)",border:"1px solid rgba(79,70,229,0.25)",borderRadius:"99px",padding:"3px 10px",color:"#6366f1",fontSize:"10px",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap" as const}}>
-                                        {icon} {label}
+                                        title={desc}
+                                        style={{background:"rgba(79,70,229,0.1)",border:"1px solid rgba(79,70,229,0.25)",borderRadius:"8px",padding:"4px 10px",color:"#6366f1",fontSize:"10px",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap" as const,display:"flex",flexDirection:"column" as const,alignItems:"flex-start" as const,gap:"1px"}}>
+                                        <span>{icon} {label}</span>
+                                        <span style={{color:"rgba(99,102,241,0.6)",fontSize:"9px",fontWeight:400}}>{desc}</span>
                                       </button>
                                     ))}
                                   </div>
                                 </div>
-                                {/* 診断ページ連携 */}
-                                <div style={{borderTop:`1px solid ${C.border}`,paddingTop:"8px"}}>
-                                  <p style={{color:C.textMuted,fontSize:"9px",fontWeight:700,letterSpacing:"0.12em",marginBottom:"5px"}}>🔬 診断ページで深掘り</p>
-                                  <div style={{display:"flex",flexWrap:"wrap" as const,gap:"4px"}}>
-                                    {([["🏗️","構造診断","structure"],["🎯","課題仮説","issue"],["⚖️","比較分析","comparison"],["⚡","矛盾検知","contradiction"],["📋","実行計画","execution"]] as [string,string,string][]).map(([icon,label,tab])=>(
-                                      <button key={tab} onClick={()=>{
-                                        const _input = encodeURIComponent([_s.summary,"\n\n【現状】\n"+(_s.cards?.current||[]).join("\n"),"\n\n【問題・リスク】\n"+(_s.cards?.risk||[]).join("\n"),"\n\n【推奨方針】\n"+(_s.cards?.plan||[]).join("\n")].join(""));
-                                        window.location.href="/diagnosis?tab="+tab+"&input="+_input;
-                                      }}
-                                        style={{background:"rgba(79,70,229,0.1)",border:"1px solid rgba(79,70,229,0.25)",borderRadius:"99px",padding:"3px 10px",color:"#6366f1",fontSize:"10px",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap" as const}}>
-                                        {icon} {label}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
+
                                 {/* 価値訴求 */}
                                 {_s.value_message && (
                                   <div style={{borderTop:`1px solid ${C.border}`,paddingTop:"7px"}}>
@@ -991,25 +979,25 @@ export default function ChatPage() {
           {/* 推奨モード表示 */}
           {(()=>{
             const _ALL_MODES: {id:string;label:string;keywords:string[];color:string}[] = [
-              {id:"NUMERIC",   label:"NUMERIC",   color:"#059669", keywords:["売上","収益","利益","コスト","KPI","数値","指標","ROI","単価","客数","率","％","%","万円","億"]},
-              {id:"STRATEGY",  label:"STRATEGY",  color:"#6366f1", keywords:["戦略","競合","差別化","ポジション","市場","参入","撤退","M&A","シェア","優位"]},
-              {id:"CONTROL",   label:"CONTROL",   color:"#0891b2", keywords:["組織","チーム","権限","管理","属人","マネジメント","構造","フロー","体制","部下"]},
-              {id:"GROWTH",    label:"GROWTH",    color:"#d97706", keywords:["成長","スキル","習慣","訓練","改善","学習","育成","キャリア","目標設定"]},
+              {id:"NUMERIC",   label:"NUMERIC",   color:"#059669", keywords:["売上","収益","利益","コスト","KPI","数値","指標","ROI","単価","客数","率","％","%","万円","億","数字","計算","集計","平均","合計","目標値","実績"]},
+              {id:"STRATEGY",  label:"STRATEGY",  color:"#6366f1", keywords:["戦略","競合","差別化","ポジション","市場","参入","撤退","M&A","シェア","優位","方向性","方針","どう戦う","勝ち方","強み","弱み","機会","脅威","ブルーオーシャン"]},
+              {id:"CONTROL",   label:"CONTROL",   color:"#0891b2", keywords:["組織","チーム","権限","管理","属人","マネジメント","構造","フロー","体制","部下","仕組み","ルール","制度","標準化","プロセス","役割","分担","指示","命令","統制"]},
+              {id:"GROWTH",    label:"GROWTH",    color:"#d97706", keywords:["成長","スキル","習慣","訓練","改善","学習","育成","キャリア","目標設定","自己","メンタル","モチベ","継続","伸ばす","強化","向上","レベルアップ","鍛える","できるようになる"]},
               {id:"ANALYSIS",  label:"ANALYSIS",  color:"#7c3aed", keywords:["分析","解析","原因","要因","データ","トレンド","比較","評価","調査"]},
-              {id:"PLANNING",  label:"PLANNING",  color:"#0891b2", keywords:["計画","ロードマップ","スケジュール","フェーズ","工程","マイルストーン","期限"]},
-              {id:"RISK",      label:"RISK",      color:"#dc2626", keywords:["リスク","危機","不安","失敗","損失","撤退","最悪","備え","保険","ヘッジ"]},
-              {id:"MARKETING", label:"MARKETING", color:"#db2777", keywords:["集客","マーケ","SNS","広告","ブランド","認知","リピート","新規","LP","CV"]},
-              {id:"DIAGNOSIS", label:"DIAGNOSIS", color:"#7c3aed", keywords:["診断","課題","問題","ボトルネック","なぜ","原因","根本","改善点"]},
-              {id:"FORECAST",  label:"FORECAST",  color:"#475569", keywords:["予測","シナリオ","将来","見通し","予想","見込み","展望","今後"]},
-              {id:"FINANCE",   label:"FINANCE",   color:"#059669", keywords:["財務","資金","融資","投資","キャッシュ","借入","資本","株","決算","BS","PL"]},
-              {id:"HR",        label:"HR",        color:"#d97706", keywords:["採用","人材","評価","離職","組織設計","給与","人事","研修","面接"]},
-              {id:"NEGOTIATION",label:"NEGOTIATION",color:"#dc2626",keywords:["交渉","説得","条件","合意","契約","価格交渉","提案","折衝"]},
-              {id:"CREATIVE",  label:"CREATIVE",  color:"#db2777", keywords:["アイデア","企画","発想","コンセプト","デザイン","新しい","ユニーク","差別化"]},
+              {id:"PLANNING",  label:"PLANNING",  color:"#0891b2", keywords:["計画","ロードマップ","スケジュール","フェーズ","工程","マイルストーン","期限","手順","段取り","ステップ","いつまでに","何から","順番","優先順位","タスク","todo","やること"]},
+              {id:"RISK",      label:"RISK",      color:"#dc2626", keywords:["リスク","危機","不安","失敗","損失","撤退","最悪","備え","保険","ヘッジ","怖い","心配","危ない","トラブル","問題","クレーム","炎上","倒産","赤字","訴訟","法的","ペナルティ"]},
+              {id:"MARKETING", label:"MARKETING", color:"#db2777", keywords:["集客","マーケ","SNS","広告","ブランド","認知","リピート","新規","LP","CV","宣材","写真","予約","ネット予約","Instagram","集める","来店","来客","反応","フォロー","投稿","バズ","バナー","撮影","構図","ポーズ","プロフィール","見た目","印象","写り","映え","集患","口コミ","評判","レビュー"]},
+              {id:"DIAGNOSIS", label:"DIAGNOSIS", color:"#7c3aed", keywords:["診断","課題","問題","ボトルネック","なぜ","原因","根本","改善点","うまくいかない","停滞","低下","落ちた","減った","悪化","把握","特定","解明","分からない"]},
+              {id:"FORECAST",  label:"FORECAST",  color:"#475569", keywords:["予測","シナリオ","将来","見通し","予想","見込み","展望","今後","これから","先読み","トレンド","変化","未来","長期","中期","短期","どうなる"]},
+              {id:"FINANCE",   label:"FINANCE",   color:"#059669", keywords:["財務","資金","融資","投資","キャッシュ","借入","資本","株","決算","BS","PL","銀行","借金","返済","利息","節税","税金","経費","補助金","助成金","資金繰り"]},
+              {id:"HR",        label:"HR",        color:"#d97706", keywords:["採用","人材","評価","離職","組織設計","給与","人事","研修","面接","求人","スタッフ","従業員","社員","パート","アルバイト","チームビルド","文化","エンゲージメント","定着","退職"]},
+              {id:"NEGOTIATION",label:"NEGOTIATION",color:"#dc2626",keywords:["交渉","説得","条件","合意","契約","価格交渉","提案","折衝","値引き","値上げ","断り方","断る","お願い","依頼","相手","どう伝える","伝え方","コミュニケーション"]},
+              {id:"CREATIVE",  label:"CREATIVE",  color:"#db2777", keywords:["アイデア","企画","発想","コンセプト","デザイン","新しい","ユニーク","差別化","面白い","斬新","クリエイティブ","ネーミング","キャッチコピー","コンテンツ","企画書"]},
               {id:"SUMMARY",   label:"SUMMARY",   color:"#475569", keywords:["要約","まとめ","整理","簡潔","ポイント","サマリー"]},
               {id:"LEGAL",     label:"LEGAL",     color:"#374151", keywords:["法務","規約","契約","法律","コンプライアンス","規制","許認可","利用規約"]},
               {id:"COACHING",  label:"COACHING",  color:"#0891b2", keywords:["コーチング","自己","内省","気づき","変革","マインド","思考パターン"]},
-              {id:"OPS",       label:"OPS",       color:"#0f766e", keywords:["業務","オペレーション","効率","工数","標準化","自動化","改善","無駄","ボトルネック","フロー整理"]},
-              {id:"TECH",      label:"TECH",      color:"#1d4ed8", keywords:["技術","エンジニア","システム","アーキテクチャ","実装","API","DB","インフラ","開発","コード"]},
+              {id:"OPS",       label:"OPS",       color:"#0f766e", keywords:["業務","オペレーション","効率","工数","標準化","自動化","改善","無駄","ボトルネック","フロー整理","作業","手作業","システム化","デジタル化","DX","省力化","時短","生産性"]},
+              {id:"TECH",      label:"TECH",      color:"#1d4ed8", keywords:["技術","エンジニア","システム","アーキテクチャ","実装","API","DB","インフラ","開発","コード","プログラム","ソフトウェア","ハードウェア","クラウド","サーバー","セキュリティ","バグ","エラー"]},
             ];
             if (input.trim().length < 8) return null;
             const _txt = input.toLowerCase();
