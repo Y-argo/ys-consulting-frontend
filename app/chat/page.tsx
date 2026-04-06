@@ -365,8 +365,9 @@ export default function ChatPage() {
           <button onClick={()=>setLeftOpen(!leftOpen)}
             style={{background:C.primary,color:"white",borderRadius:"10px",padding:"5px 12px",fontSize:"16px",border:"none",cursor:"pointer",flexShrink:0}}>☰</button>
         </div>
-        {/* 2行目: AIエンジン + ユーザー 右寄せ */}
-        <div className="flex items-center gap-2 px-4 pb-2 justify-end">
+        {/* 2行目: テナント名（左）AIエンジン + ユーザー 右寄せ */}
+        <div className="flex items-center gap-2 px-4 pb-2">
+          <span style={{color:C.primary,fontSize:"10px",fontWeight:700,letterSpacing:"0.01em",flex:1}}>Ys Consulting Office</span>
           <div style={{background:"rgba(79,70,229,0.08)",border:`1px solid ${C.borderPrimary}`,borderRadius:"10px"}} className="px-2 py-1 flex items-center gap-1">
             <span className="text-xs" style={{color:C.primary}}>⚡</span>
             <select value={aiTier} onChange={e=>setAiTier(e.target.value)} style={{background:"transparent",color:C.primary}} className="text-xs focus:outline-none cursor-pointer">
@@ -390,10 +391,7 @@ export default function ChatPage() {
         {leftOpen && (
           <aside style={{background:C.sidebar, borderRight:`1px solid ${C.border}`, width:"220px", overflowY:"auto", scrollbarWidth:"none"}} className="flex-shrink-0 flex flex-col [&::-webkit-scrollbar]:hidden">
             <div className="p-3 space-y-2" style={{minHeight:"min-content"}}>
-              {/* サイドバータイトル */}
-              <div className="flex items-center gap-2 pt-1 pb-2 px-1">
-                <span style={{color:C.primary,fontWeight:900,fontSize:"13px",letterSpacing:"0.01em"}}>Ys Consulting Office</span>
-              </div>
+
               {/* ランクスコア プレミアム */}
               {stats && (() => {
                 const rankColors: Record<string,{bg:string,border:string,text:string,badge:string}> = {
@@ -533,7 +531,7 @@ export default function ChatPage() {
         {/* MAIN */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* モードバー */}
-          <div style={{background:C.card, borderBottom:`1px solid ${C.border}`}} className="flex items-center gap-1.5 px-4 py-2 overflow-x-auto flex-shrink-0">
+          <div style={{background:C.card, borderBottom:`1px solid ${C.border}`, overflowX:"auto", scrollbarWidth:"none"}} className="flex items-center gap-1.5 px-4 py-2 flex-shrink-0 [&::-webkit-scrollbar]:hidden">
             <span style={{fontSize:"10px",fontWeight:700,color:C.textMuted,letterSpacing:"0.12em",whiteSpace:"nowrap",flexShrink:0,paddingRight:"4px"}}>モード選択</span>
             {purposeModes.map(m=>(
               <button key={m.id} onClick={()=>setPurposeMode(m.id)}

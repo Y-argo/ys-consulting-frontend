@@ -1177,6 +1177,70 @@ function DiagnosisPageInner() {
                 ))}
               </div>
             )}
+
+            {/* 未解決アラート */}
+            {graphData && (graphData as any).unresolved_alerts?.length > 0 && (
+              <div style={{background:"rgba(254,226,226,0.9)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:"16px",padding:"16px 20px"}}>
+                <p style={{color:"#dc2626",fontSize:"10px",fontWeight:800,letterSpacing:"0.15em",marginBottom:"10px"}}>⚠️ 未解決課題アラート</p>
+                {((graphData as any).unresolved_alerts as {topic:string;count:number;message:string}[]).map((a,i)=>(
+                  <div key={i} style={{display:"flex",alignItems:"flex-start",gap:"8px",marginBottom:"8px"}}>
+                    <span style={{color:"#dc2626",fontWeight:900,fontSize:"13px",flexShrink:0}}>{a.count}回</span>
+                    <p style={{color:"#7f1d1d",fontSize:"12px",lineHeight:1.6}}>{a.message}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 課題構造ツリー */}
+            {graphData && (graphData as any).issue_tree?.root_issues?.length > 0 && (
+              <div style={{background:"rgba(238,242,255,0.95)",border:"1px solid rgba(99,102,241,0.25)",borderRadius:"16px",padding:"16px 20px"}}>
+                <p style={{color:"#4338ca",fontSize:"10px",fontWeight:800,letterSpacing:"0.15em",marginBottom:"12px"}}>🧠 AIによる課題構造分析</p>
+                {(graphData as any).issue_tree.priority_action && (
+                  <div style={{background:"linear-gradient(135deg,#6366f1,#8b5cf6)",borderRadius:"10px",padding:"10px 14px",marginBottom:"12px"}}>
+                    <p style={{color:"rgba(255,255,255,0.6)",fontSize:"9px",fontWeight:700,marginBottom:"3px"}}>最優先アクション</p>
+                    <p style={{color:"white",fontSize:"13px",fontWeight:700}}>{(graphData as any).issue_tree.priority_action}</p>
+                  </div>
+                )}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px"}}>
+                  {[
+                    ["🔴 根本課題","root_issues","#dc2626"],
+                    ["🟡 表面的課題","surface_issues","#d97706"],
+                    ["🔁 繰り返しパターン","recurring_patterns","#8b5cf6"],
+                    ["🌱 成長機会","growth_opportunities","#059669"],
+                  ].map(([title,key,color])=>(
+                    (graphData as any).issue_tree[key]?.length > 0 && (
+                      <div key={key} style={{background:`${color}10`,border:`1px solid ${color}30`,borderRadius:"10px",padding:"10px 12px"}}>
+                        <p style={{color:color as string,fontSize:"10px",fontWeight:700,marginBottom:"6px"}}>{title as string}</p>
+                        {((graphData as any).issue_tree[key] as string[]).map((item:string,j:number)=>(
+                          <div key={j} style={{display:"flex",gap:"4px",marginBottom:"3px"}}>
+                            <span style={{color:color as string,fontSize:"9px",flexShrink:0}}>▸</span>
+                            <p style={{color:C.textSub,fontSize:"11px",lineHeight:1.5}}>{item}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 成長トレンド */}
+            {graphData && (graphData as any).growth_trend?.length > 0 && (
+              <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",padding:"16px 20px"}}>
+                <p style={{color:C.textMain,fontSize:"10px",fontWeight:800,letterSpacing:"0.15em",marginBottom:"12px"}}>📈 相談テーマ・成長トレンド</p>
+                <div className="space-y-2">
+                  {((graphData as any).growth_trend as {topic:string;session_count:number;last_date:string}[]).slice(0,6).map((t,i)=>(
+                    <div key={i} style={{display:"flex",alignItems:"center",gap:"10px"}}>
+                      <span style={{color:C.textSub,fontSize:"11px",width:"100px",flexShrink:0}}>{t.topic}</span>
+                      <div style={{flex:1,background:"rgba(0,0,0,0.06)",borderRadius:"99px",height:"6px"}}>
+                        <div style={{width:`${Math.min(t.session_count*20,100)}%`,background:"linear-gradient(90deg,#6366f1,#8b5cf6)",borderRadius:"99px",height:"6px"}}/>
+                      </div>
+                      <span style={{color:C.textMuted,fontSize:"10px",width:"40px",textAlign:"right" as const}}>{t.session_count}日</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
