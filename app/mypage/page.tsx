@@ -1,6 +1,51 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+
+function GalleryInner({uid, C}: {uid:string, C:any}) {
+  const [images, setImages] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+
+  useEffect(()=>{
+    setLoading(true);
+    const token = typeof window !== "undefined" ? localStorage.getItem("ascend_token")||"" : "";
+    fetch(`${API_BASE}/api/chat/images`, {headers:{Authorization:`Bearer ${token}`}})
+      .then(r=>r.json()).then(d=>setImages(d.images||[])).catch(()=>{}).finally(()=>setLoading(false));
+  },[]);
+
+  function handleDelete(image_id: string) {
+    const token = typeof window !== "undefined" ? localStorage.getItem("ascend_token")||"" : "";
+    fetch(`${API_BASE}/api/chat/images/${image_id}`, {method:"DELETE", headers:{Authorization:`Bearer ${token}`}})
+      .then(()=>setImages(prev=>prev.filter(i=>i.image_id!==image_id)));
+  }
+
+  if (loading) return <p style={{color:C.textMuted,fontSize:"13px"}}>読み込み中...</p>;
+  if (images.length===0) return <p style={{color:C.textMuted,fontSize:"13px"}}>生成した画像がまだありません。</p>;
+
+  return (
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:"12px"}}>
+      {images.map((img,i)=>(
+        <div key={i} style={{border:`1px solid ${C.border}`,borderRadius:"12px",overflow:"hidden",background:C.card,boxShadow:C.shadow}}>
+          <img src={img.gcs_url} alt={`img_${i}`} style={{width:"100%",height:"140px",objectFit:"cover",display:"block"}}/>
+          <div style={{padding:"8px"}}>
+            <p style={{color:C.textMuted,fontSize:"9px",marginBottom:"4px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{img.prompt||""}</p>
+            <div style={{display:"flex",gap:"4px"}}>
+              <a href={img.gcs_url} target="_blank" rel="noreferrer"
+                style={{flex:1,background:`rgba(79,70,229,0.08)`,border:`1px solid ${C.borderPrimary}`,borderRadius:"6px",color:C.primary,fontSize:"10px",fontWeight:600,textAlign:"center",padding:"3px 0",textDecoration:"none"}}>
+                📥 保存
+              </a>
+              <button onClick={()=>handleDelete(img.image_id)}
+                style={{flex:1,background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:"6px",color:"#ef4444",fontSize:"10px",fontWeight:600,cursor:"pointer"}}>
+                🗑️ 削除
+              </button>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 import dynamic from "next/dynamic";
 const ReactMarkdown = dynamic(() => import("react-markdown"), { ssr: false, loading: () => null });
 import {
@@ -9,7 +54,7 @@ import {
   getCustomPrompt, saveCustomPrompt, getHeaderConfig, listInquiries, getTheme,
   UserStats, ThemeConfig,
 } from "@/lib/api";
-type Tab = "overview"|"metrics"|"fc"|"dm"|"logs"|"rankup"|"manual"|"guide"|"about"|"cookie"|"settings";
+type Tab = "overview"|"metrics"|"fc"|"dm"|"logs"|"rankup"|"manual"|"guide"|"about"|"cookie"|"settings"|"gallery";
 const C = {
   bg:"#f8f9fc", card:"#ffffff", primary:"#4f46e5", primary2:"#7c3aed",
   textMain:"#111827", textSub:"#6b7280", textMuted:"#9ca3af",
@@ -90,6 +135,7 @@ export default function MyPage() {
     {id:"manual",label:"📖 マニュアル"},
     {id:"guide",label:"📝 ガイド"},
     {id:"logs",label:"📋 履歴"},
+    ...(features?.image_generation!==false ? [{id:"gallery" as Tab,label:"🎨 ギャラリー"}] : []),
     {id:"cookie",label:"🍪 Cookie"},
     {id:"settings",label:"⚙️ 設定"},
   ] as {id:Tab;label:string;badge?:number}[];
@@ -506,6 +552,12 @@ export default function MyPage() {
         )}
 
         {/* 利用履歴 */}
+        {tab==="gallery" && (
+          <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"24px",boxShadow:C.shadowMd,padding:"24px"}}>
+            <p style={{color:C.textMain,fontWeight:900,fontSize:"16px",marginBottom:"16px"}}>🎨 生成画像ギャラリー</p>
+            <GalleryInner uid={uid} C={C}/>
+          </div>
+        )}
         {tab==="logs" && (
           <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"24px",boxShadow:C.shadowMd}} className="p-6">
             <h2 className="text-lg font-black mb-4" style={{color:C.textMain}}>📋 利用履歴</h2>

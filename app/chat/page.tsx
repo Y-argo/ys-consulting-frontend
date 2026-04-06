@@ -142,7 +142,11 @@ export default function ChatPage() {
     };
   }, []);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({behavior:"smooth"}); }, [messages]);
+  const scrollToBottom = (smooth: boolean = true) => {
+    bottomRef.current?.scrollIntoView({behavior: smooth ? "smooth" : "auto"});
+  };
+  useEffect(() => { scrollToBottom(false); }, []);
+  useEffect(() => { scrollToBottom(true); }, [messages]);
 
   async function fetchSessions() {
     const s = await listSessions();
@@ -151,6 +155,7 @@ export default function ChatPage() {
   async function fetchHistory(cid: string) {
     const h = await loadHistory(cid);
     setMessages(h.map((m,i)=>({...m, id:`hist_${i}_${Date.now()}`, suggestions: m.cases||[], structured: m.structured||undefined})));
+    setTimeout(()=>scrollToBottom(false), 100);
     setChatId(cid);
   }
 
@@ -514,7 +519,7 @@ export default function ChatPage() {
               {[
                 {icon:"✏️",label:"チャット名変更",fn:()=>openModal("rename")},
                 {icon:"🗑️",label:"このチャット削除",fn:handleDelete},
-                {icon:"🔬",label:"現状課題診断",fn:()=>router.push("/diagnosis")},
+                {icon:"🔬",label:"現状課題診断",fn:()=>router.push("/diagnosis?tab=diagnosis")},
                 {icon:"📩",label:"個人相談",fn:()=>router.push("/inquiry")},
               ].map(item=>(
                 <button key={item.label} onClick={item.fn} style={{color:C.textSub,borderRadius:"10px"}} className="w-full text-left text-xs hover:text-gray-700 hover:bg-black/4 px-3 py-1.5 transition-all">
@@ -830,14 +835,18 @@ export default function ChatPage() {
                         })()}
                         {m.images && m.images.length>0 && (
                           <div className="mt-3 space-y-2">
-                            {m.images.map((img,ii)=>(
-                              <div key={ii}>
-                                <img src={`data:${img.mime_type};base64,${img.data}`} alt={`generated_${ii+1}`} className="max-w-full rounded-xl" style={{maxHeight:"400px",objectFit:"contain",border:`1px solid ${C.border}`}}/>
-                                <a href={`data:${img.mime_type};base64,${img.data}`} download={`image_${ii+1}.png`}
-                                  style={{background:"rgba(79,70,229,0.08)",border:`1px solid ${C.borderPrimary}`,borderRadius:"8px",color:C.primary}}
-                                  className="inline-block mt-1 text-xs px-3 py-1 hover:text-indigo-700">📥 画像を保存</a>
-                              </div>
-                            ))}
+                            {m.images.map((img:any,ii:number)=>{
+                              const _src = (img as any).gcs_url || (img.data ? `data:${img.mime_type};base64,${img.data}` : null);
+                              if (!_src) return null;
+                              return (
+                                <div key={ii}>
+                                  <img src={_src} alt={`generated_${ii+1}`} className="max-w-full rounded-xl" style={{maxHeight:"400px",objectFit:"contain",border:`1px solid ${C.border}`}}/>
+                                  <a href={_src} target="_blank" rel="noreferrer"
+                                    style={{background:"rgba(79,70,229,0.08)",border:`1px solid ${C.borderPrimary}`,borderRadius:"8px",color:C.primary}}
+                                    className="inline-block mt-1 text-xs px-3 py-1 hover:text-indigo-700">📥 画像を保存</a>
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                         {m.tableResult && m.tableResult.columns && m.tableResult.columns.length>0 && (
