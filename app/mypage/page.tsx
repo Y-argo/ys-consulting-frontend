@@ -299,6 +299,7 @@ export default function MyPage() {
                 </button>
               ))}
             </div>
+            <p className="text-xs text-center pb-1" style={{color:stats?.is_unlimited ? "#22c55e" : stats?.expires_at ? (new Date(stats.expires_at) < new Date() ? "#ef4444" : "#6b7280") : "#6b7280"}}>📅 {stats?.is_unlimited ? "無期限" : stats?.expires_at ? stats.expires_at.slice(0,10)+"まで" : "有効期限未設定"}</p>
             <button onClick={()=>{logout();router.push("/");}} className="w-full text-xs py-3 transition-colors" style={{color:C.textMuted}}>ログアウト</button>
           </div>
         )}
@@ -582,7 +583,7 @@ export default function MyPage() {
             <div style={{background:"rgba(0,0,0,0.02)",border:`1px solid ${C.border}`,borderRadius:"16px"}} className="p-4 space-y-2">
               <p className="font-bold text-sm mb-2" style={{color:C.textMain}}>セッション情報</p>
               <p className="text-xs" style={{color:C.textMuted}}>認証トークン: ブラウザのlocalStorageに保存</p>
-              <p className="text-xs" style={{color:C.textMuted}}>有効期限: {stats?.is_unlimited ? "無期限" : "ログインから7日間"}</p>
+              <p className="text-xs" style={{color:C.textMuted}}>有効期限: {stats?.is_unlimited ? "無期限" : stats?.expires_at ? stats.expires_at.slice(0,10) + " まで" : "設定なし"}</p>
               <p className="text-xs" style={{color:C.textMuted}}>UID: {uid}</p>
             </div>
             <button onClick={()=>{logout();router.push("/");}} style={{background:"rgba(239,68,68,0.06)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:"16px",color:"#ef4444"}} className="w-full py-3 text-sm font-medium transition-all hover:bg-red-50">

@@ -28,7 +28,9 @@ export async function loginUser(uid: string, password: string): Promise<LoginRes
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || "ログインに失敗しました");
+    const detail = err.detail || "ログインに失敗しました";
+    if (detail === "EXPIRED") throw new Error("EXPIRED");
+    throw new Error(detail);
   }
   const data: LoginResult = await res.json();
   localStorage.setItem("ascend_token", data.token);
@@ -184,6 +186,7 @@ export interface UserStats {
   diag_checkpoint: number;
   fixed_concept_score: number | null;
   is_unlimited?: boolean;
+  expires_at?: string;
   level_last_delta?: number;
 }
 

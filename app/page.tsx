@@ -122,7 +122,14 @@ export default function LoginPage() {
 
             {error && (
               <div className="bg-red-900/20 border border-red-800/50 rounded-xl px-4 py-2.5">
-                <p className="text-red-400 text-xs">{error}</p>
+                {error === "EXPIRED" ? (
+                  <>
+                    <p className="text-red-400 text-xs font-bold">利用有効期限が失効しています。</p>
+                    <p className="text-red-400 text-xs mt-1">Ys Consulting Office までご連絡ください。</p>
+                  </>
+                ) : (
+                  <p className="text-red-400 text-xs">{error}</p>
+                )}
               </div>
             )}
 
@@ -136,6 +143,18 @@ export default function LoginPage() {
           </form>
         </div>
 
+        {mode === "register" && (
+          <div className="mt-4 bg-[#0d0d14] border border-[#2a2a4a] rounded-2xl p-4 text-xs text-gray-500 space-y-2">
+            <p className="font-bold text-gray-400">📋 新規登録の流れ</p>
+            <p>① UID・パスワードを設定してアカウントを作成</p>
+            <p>② ログイン後すぐにASCENDをご利用いただけます</p>
+            <p>③ 初期有効期限は登録から<span className="text-gray-300 font-bold">7日間</span>です</p>
+            <div className="border-t border-[#2a2a4a] pt-2 mt-2">
+              <p className="text-gray-600">※ 初期設定では<span className="text-gray-400">デフォルト業種</span>が適用されます。</p>
+              <p className="text-gray-600">※ 業種変更・有効期限延長・プラン変更は<span className="text-blue-400 font-bold">Ys Consulting Office</span>までご連絡ください。</p>
+            </div>
+          </div>
+        )}
         {/* フッター */}
         <p className="text-center text-xs text-gray-700 mt-6">
           ※ 本AIの出力は意思決定支援のための提案です。投資・法務・医療等の重要事項は専門家にご確認ください。

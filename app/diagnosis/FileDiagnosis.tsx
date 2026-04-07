@@ -150,6 +150,7 @@ export default function FileDiagnosis({C}: {C: any}) {
 
   const fileRef = useRef<HTMLInputElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  const contextSavedRef = useRef<boolean>(false);
 
   useEffect(()=>{
     setMounted(true);
@@ -180,6 +181,7 @@ export default function FileDiagnosis({C}: {C: any}) {
     setChatMsgs([]);
     setIsReady(false);
     setResult(null);
+    contextSavedRef.current = false;
 
     const fileKey = getFileKey(file);
 
@@ -269,12 +271,13 @@ export default function FileDiagnosis({C}: {C: any}) {
       const d = await res.json();
 
       const aiMsg: ChatMsg = {role:"ai", content:d.message};
-      setChatMsgs([...newMsgs, aiMsg]);
+      const completeMsgs = [...newMsgs, aiMsg];
+      setChatMsgs(completeMsgs);
 
       if (d.is_ready) {
         setIsReady(true);
-        // 会話内容をコンテキストとして保存
-        await saveContext(newMsgs, d.message);
+        // 会話内容をコンテキストとして保存（AIの最終メッセージも含む完全履歴）
+        await saveContext(completeMsgs, d.message);
       }
     } catch(e:any) {
       setChatMsgs([...newMsgs, {role:"ai", content:`エラー: ${e.message}`}]);
@@ -286,6 +289,8 @@ export default function FileDiagnosis({C}: {C: any}) {
   // コンテキストをFirestoreに保存
   async function saveContext(msgs: ChatMsg[], lastAiMsg: string) {
     if (!file) return;
+    const currentToken = token || (typeof window !== "undefined" ? localStorage.getItem("ascend_token") || "" : "");
+    if (!currentToken) { console.error("[file_clarify_save] token未取得"); return; }
     const fileKey = getFileKey(file);
     const contextObj: any = {};
     msgs.forEach((m,i)=>{
@@ -294,12 +299,20 @@ export default function FileDiagnosis({C}: {C: any}) {
     });
     contextObj["最終確認"] = lastAiMsg;
     try {
-      await fetch(`${API_BASE}/api/diagnosis/file_clarify_save`, {
+      const res = await fetch(`${API_BASE}/api/diagnosis/file_clarify_save`, {
         method:"POST",
-        headers: {Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
+        headers: {Authorization:`Bearer ${currentToken}`,"Content-Type":"application/json"},
         body: JSON.stringify({file_key:fileKey, context:contextObj}),
       });
-    } catch {}
+      if (!res.ok) {
+        const err = await res.json().catch(()=>({}));
+        console.error("[file_clarify_save] APIエラー:", res.status, err);
+      } else {
+        contextSavedRef.current = true;
+      }
+    } catch(e) {
+      console.error("[file_clarify_save] fetchエラー:", e);
+    }
   }
 
   // Step3: 本診断実行
@@ -307,8 +320,8 @@ export default function FileDiagnosis({C}: {C: any}) {
     if (!file) return;
     setPhase("diagnosing");
     setDiagLoading(true);
-    // 保存済みコンテキストがない場合のみ保存（上書き防止）
-    if (chatMsgs.length > 0 && !savedContext.found) {
+    // 保存済みコンテキストがない かつ まだ保存していない場合のみ保存
+    if (chatMsgs.length > 0 && !savedContext.found && !contextSavedRef.current) {
       await saveContext(chatMsgs, "診断開始");
     }
 

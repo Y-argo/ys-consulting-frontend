@@ -526,6 +526,30 @@ export default function ChatPage() {
                   {item.icon} {item.label}
                 </button>
               ))}
+              {(() => {
+                if (stats?.is_unlimited) {
+                  return (
+                    <div className="px-3 py-1.5 text-xs" style={{color:"#22c55e"}}>
+                      🗓 無期限
+                    </div>
+                  );
+                }
+                if (stats?.expires_at) {
+                  const exp = new Date(stats.expires_at);
+                  const now = new Date();
+                  const diff = Math.ceil((exp.getTime() - now.getTime()) / (1000*60*60*24));
+                  const expired = diff < 0;
+                  const soon = !expired && diff <= 3;
+                  const color = expired ? "#ef4444" : soon ? "#f97316" : "#6b7280";
+                  const label = expired ? "失効" : `残${diff}日`;
+                  return (
+                    <div className="px-3 py-1.5 text-xs" style={{color}}>
+                      🗓 {stats.expires_at.slice(0,10)}（{label}）
+                    </div>
+                  );
+                }
+                return null;
+              })()}
               <button onClick={()=>{logout();router.push("/");}} className="w-full text-left text-xs px-3 py-1.5 transition-all hover:text-red-500" style={{color:C.textMuted,borderRadius:"10px"}}>
                 ← ログアウト
               </button>
