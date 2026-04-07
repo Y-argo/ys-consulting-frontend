@@ -3,9 +3,32 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { loginUser, registerUser } from "@/lib/api";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL || "";
+
 export default function LoginPage() {
   const router = useRouter();
-  const [mode, setMode] = useState<"login"|"register">("login");
+  const [mode, setMode] = useState<"login"|"register"|"contact">("login");
+  const [contactName, setContactName] = useState("");
+  const [contactMsg, setContactMsg] = useState("");
+  const [contactDone, setContactDone] = useState(false);
+  const [contactLoading, setContactLoading] = useState(false);
+
+  async function handleContact(e: React.FormEvent) {
+    e.preventDefault();
+    setContactLoading(true);
+    try {
+      await fetch(`${API_BASE}/api/auth/contact`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: contactName, message: contactMsg }),
+      });
+      setContactDone(true);
+    } catch {
+      // silent
+    } finally {
+      setContactLoading(false);
+    }
+  }
   const [uid, setUid] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -66,6 +89,10 @@ export default function LoginPage() {
             onClick={()=>{setMode("register");setError("");}}
             className={"flex-1 py-2 text-sm font-medium rounded-xl transition-all "+(mode==="register"?"bg-blue-600 text-white shadow-lg":"text-gray-500 hover:text-gray-300")}
           >新規登録</button>
+          <button
+            onClick={()=>{setMode("contact");setError("");setContactDone(false);}}
+            className={"flex-1 py-2 text-sm font-medium rounded-xl transition-all "+(mode==="contact"?"bg-blue-600 text-white shadow-lg":"text-gray-500 hover:text-gray-300")}
+          >お問い合わせ</button>
         </div>
 
         {/* フォーム */}
@@ -153,6 +180,50 @@ export default function LoginPage() {
               <p className="text-gray-600">※ 初期設定では<span className="text-gray-400">デフォルト業種</span>が適用されます。</p>
               <p className="text-gray-600">※ 業種変更・有効期限延長・プラン変更は<span className="text-blue-400 font-bold">Ys Consulting Office</span>までご連絡ください。</p>
             </div>
+          </div>
+        )}
+        {mode === "contact" && (
+          <div className="bg-[#0d0d14] border border-[#2a2a4a] rounded-2xl p-6 shadow-2xl mt-0">
+            {contactDone ? (
+              <div className="text-center py-6">
+                <p className="text-green-400 font-bold text-sm mb-2">✅ 送信完了しました</p>
+                <p className="text-gray-500 text-xs">内容を確認の上、ご連絡いたします。</p>
+                <button onClick={()=>{setMode("login");setContactDone(false);}} className="mt-4 text-xs text-blue-400 underline">ログインに戻る</button>
+              </div>
+            ) : (
+              <form onSubmit={handleContact} className="space-y-4">
+                <p className="text-xs text-gray-500">業種変更・有効期限延長・プラン変更などについてお問い合わせください。</p>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1.5 font-medium">お名前</label>
+                  <input
+                    type="text"
+                    value={contactName}
+                    onChange={e=>setContactName(e.target.value)}
+                    required
+                    className="w-full bg-[#1a1a2e] text-white border border-[#2a2a4a] focus:border-blue-600 rounded-xl px-4 py-2.5 text-sm focus:outline-none transition-colors"
+                    placeholder="お名前またはUID"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1.5 font-medium">お問い合わせ内容</label>
+                  <textarea
+                    value={contactMsg}
+                    onChange={e=>setContactMsg(e.target.value)}
+                    required
+                    rows={4}
+                    className="w-full bg-[#1a1a2e] text-white border border-[#2a2a4a] focus:border-blue-600 rounded-xl px-4 py-2.5 text-sm focus:outline-none transition-colors resize-none"
+                    placeholder="ご要望・ご質問をご記入ください"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={contactLoading}
+                  className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-gray-700 disabled:to-gray-700 disabled:text-gray-500 text-white font-bold rounded-xl py-3 text-sm transition-all shadow-lg shadow-blue-900/30"
+                >
+                  {contactLoading ? "送信中..." : "送信する"}
+                </button>
+              </form>
+            )}
           </div>
         )}
         {/* フッター */}

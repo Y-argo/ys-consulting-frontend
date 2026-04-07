@@ -396,12 +396,12 @@ export default function MyPage() {
         {tab==="fc" && (
           <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"24px",boxShadow:C.shadowMd}} className="p-6">
             <h2 className="text-lg font-black mb-4" style={{color:C.textMain}}>🧠 固定概念レポート</h2>
-            {fcData.report
+            {fcData.report && fcCount >= fcThreshold
               ? <div className="prose prose-sm max-w-none" style={{color:C.textMain}}><ReactMarkdown>{String(fcData.report.report_text||JSON.stringify(fcData.report,null,2))}</ReactMarkdown></div>
               : <div className="text-center py-12">
                   <p className="text-4xl mb-4">🔒</p>
                   <p className="font-bold mb-2" style={{color:C.textMain}}>レポート未解放</p>
-                  <p className="text-sm" style={{color:C.textMuted}}>あと {fcThreshold-fcCount} 回のチャットで解放されます</p>
+                  <p className="text-sm" style={{color:C.textMuted}}>あと {fcThreshold-fcCount} 回のRAG採用で解放されます</p>
                   <div style={{background:"rgba(0,0,0,0.06)",borderRadius:"99px",height:"8px",margin:"16px 0"}}>
                     <div style={{width:`${fcPct}%`,background:`linear-gradient(90deg,${C.primary},${C.primary2})`,borderRadius:"99px",height:"8px"}}/>
                   </div>

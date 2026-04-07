@@ -26,6 +26,7 @@ const C = {
 function DiagnosisPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [mounted, setMounted] = useState(false);
   const [tab, setTab] = useState<TabId>("diagnosis");
   const graphRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(false);
@@ -56,6 +57,7 @@ function DiagnosisPageInner() {
   const [features, setFeatures] = useState<Record<string,boolean>>({});
 
   useEffect(() => {
+    setMounted(true);
     const urlTab = searchParams.get("tab") as TabId;
     if (urlTab) {
       setTab(urlTab);
@@ -554,10 +556,10 @@ function DiagnosisPageInner() {
             <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",boxShadow:C.shadow}} className="p-5">
               <p className="text-sm text-gray-500 mb-4">直近のチャット履歴をAIが分析し、あなたの現状課題と意思決定パターンを診断します。</p>
               <div className="flex gap-3 items-center">
-                <button onClick={handleGenerate} disabled={loading}
-                  style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,boxShadow:C.shadowPrimary,borderRadius:"12px"}}
+                <button onClick={handleGenerate} disabled={loading || (mounted && stats!==null && !stats?.diag_available)}
+                  style={{background:(mounted && stats!==null && !stats?.diag_available)?"#374151":`linear-gradient(135deg,${C.primary},${C.primary2})`,boxShadow:(mounted && stats!==null && !stats?.diag_available)?"none":C.shadowPrimary,borderRadius:"12px"}}
                   className="text-white text-sm font-bold px-6 py-2.5 hover:opacity-90 disabled:opacity-50 transition-all">
-                  {loading ? "生成中..." : "🔬 診断レポートを生成"}
+                  {loading ? "生成中..." : (mounted && stats!==null && !stats?.diag_available) ? `🔒 あと${(stats?.diag_next_unlock??0)-(stats?.total_chat_count??0)}回` : "🔬 診断レポートを生成"}
                 </button>
                 {history.length>0 && (
                   <select onChange={e=>{const h=history.find(x=>x.doc_id===e.target.value);if(h)setReport(h.report_md);}}
