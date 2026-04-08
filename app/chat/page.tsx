@@ -22,6 +22,7 @@ interface MsgExt extends Message {
   attachment?: AttachmentResult;
   images?: {mime_type:string; data:string}[];
   tableResult?: TableResult;
+  usedMode?: string;
   structured?: { summary: string; cards: { current: string[]; risk: string[]; plan: string[] }; analysis: { type: string; urgency: string; importance: string; mode: string }; actions: string[]; value_message: string; };
 }
 
@@ -53,9 +54,11 @@ export default function ChatPage() {
   const [aiTier, setAiTier] = useState("core");
   const [ultraEnabled, setUltraEnabled] = useState(false);
   const [apexEnabled, setApexEnabled] = useState(false);
+  const [hasInvestSignal, setHasInvestSignal] = useState(false);
   const [stats, setStats] = useState<UserStats|null>(null);
   const [usageLogs, setUsageLogs] = useState<{prompt:string;timestamp:string}[]>([]);
   const [purposeMode, setPurposeMode] = useState("AUTO");
+  const [chatMode, setChatMode] = useState<"talk"|"consult">("consult");
   const [modal, setModal] = useState<Modal>("none");
   const [modalContent, setModalContent] = useState("");
   const [renameVal, setRenameVal] = useState("");
@@ -98,6 +101,7 @@ export default function ChatPage() {
       const hasApex = !!f.ascend_apex;
       setUltraEnabled(hasUltra);
       setApexEnabled(hasApex);
+      setHasInvestSignal(!!f.diag_investment);
       const savedTier = localStorage.getItem("ascend_ai_tier_default");
       if (savedTier === "ultra" && hasUltra) setAiTier("ultra");
       else if (savedTier === "apex" && hasApex) setAiTier("apex");
@@ -178,6 +182,7 @@ export default function ChatPage() {
       id:`u_${Date.now()}`, role:"user",
       content: attachment ? `${text}\n\n[添付: ${attachment.filename}]\n${attachment.extracted_text.slice(0,1000)}` : text,
       attachment: attachment||undefined,
+      usedMode: purposeMode,
     };
     setAttachment(null);
     setMessages(p=>[...p, userMsg]);
@@ -205,11 +210,11 @@ export default function ChatPage() {
         }
         const { sendImageMessage } = await import("@/lib/api");
         res = await sendImageMessage(sendText, chatId, aiTier, _imgB64, _imgMime);
-      } else if (_isInvestReq2) {
+      } else if (_isInvestReq2 && purposeMode !== "FINANCE") {
         const { sendInvestMessage } = await import("@/lib/api");
         res = await sendInvestMessage(sendText, chatId, aiTier);
       } else {
-        res = await sendMessage(sendText, chatId, aiTier, purposeMode);
+        res = await sendMessage(sendText, chatId, aiTier, purposeMode, chatMode);
       }
       const cases = res.cases||[];
       const images = res.images||[];
@@ -249,6 +254,7 @@ export default function ChatPage() {
     const userMsg: MsgExt = {
       id:`u_${Date.now()}`, role:"user",
       content: text,
+      usedMode: purposeMode,
     };
     setMessages(p=>[...p, userMsg]);
     setLoading(true);
@@ -261,11 +267,11 @@ export default function ChatPage() {
       if (_isImageReq2) {
         const { sendImageMessage } = await import("@/lib/api");
         res = await sendImageMessage(text, chatId, aiTier);
-      } else if (_isInvestReq2) {
+      } else if (_isInvestReq2 && purposeMode !== "FINANCE") {
         const { sendInvestMessage } = await import("@/lib/api");
         res = await sendInvestMessage(text, chatId, aiTier);
       } else {
-        res = await sendMessage(text, chatId, aiTier, purposeMode);
+        res = await sendMessage(text, chatId, aiTier, purposeMode, chatMode);
       }
       clearInterval(_stepTimer);
       const cases = res.cases||[];
@@ -561,6 +567,19 @@ export default function ChatPage() {
         <div className="flex-1 flex flex-col min-w-0">
           {/* モードバー */}
           <div style={{background:C.card, borderBottom:`1px solid ${C.border}`, overflowX:"auto", scrollbarWidth:"none"}} className="flex items-center gap-1.5 px-4 py-2 flex-shrink-0 [&::-webkit-scrollbar]:hidden">
+            {/* 会話/相談トグル */}
+            <div className="flex items-center flex-shrink-0 mr-2" style={{background:"rgba(0,0,0,0.04)",borderRadius:"10px",padding:"2px"}}>
+              <button onClick={()=>setChatMode("talk")}
+                style={{borderRadius:"8px",fontSize:"11px",fontWeight:700,padding:"4px 10px",transition:"all 0.2s",
+                  background:chatMode==="talk"?"#6366f1":"transparent",
+                  color:chatMode==="talk"?"white":C.textMuted}}
+              >💬 会話</button>
+              <button onClick={()=>setChatMode("consult")}
+                style={{borderRadius:"8px",fontSize:"11px",fontWeight:700,padding:"4px 10px",transition:"all 0.2s",
+                  background:chatMode==="consult"?`linear-gradient(135deg,${C.primary},${C.primary2})`:"transparent",
+                  color:chatMode==="consult"?"white":C.textMuted}}
+              >🎯 相談</button>
+            </div>
             <span style={{fontSize:"10px",fontWeight:700,color:C.textMuted,letterSpacing:"0.12em",whiteSpace:"nowrap",flexShrink:0,paddingRight:"4px"}}>モード選択</span>
             {purposeModes.map(m=>(
               <button key={m.id} onClick={()=>setPurposeMode(m.id)}
@@ -627,6 +646,7 @@ export default function ChatPage() {
                         </div>
                       ) : (
                         <>
+                          {m.usedMode && m.usedMode!=="AUTO" && <div className="flex justify-end mb-1"><span style={{background:"rgba(99,102,241,0.15)",border:"1px solid rgba(99,102,241,0.3)",borderRadius:"99px",padding:"2px 10px",fontSize:"10px",color:"#818cf8",fontWeight:700}}>★ {m.usedMode}</span></div>}
                           <div style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`, borderRadius:"18px 18px 4px 18px", boxShadow:C.shadowPrimary}} className="px-4 py-3 text-sm text-white leading-relaxed">
                             {m.attachment && (
                               <div style={{background:"rgba(255,255,255,0.15)",borderRadius:"8px"}} className="mb-2 px-2 py-1 text-xs text-indigo-100">
@@ -719,6 +739,40 @@ export default function ChatPage() {
                             const _s = m.structured as {summary:string;cards:{current:string[];risk:string[];plan:string[]};analysis:{type:string;urgency:string;importance:string;mode:string};actions:string[];value_message:string};
                             const _modeColor: Record<string,string> = {NUMERIC:"#059669",STRATEGY:"#6366f1",CONTROL:"#0891b2",RISK:"#dc2626",MARKETING:"#db2777",GROWTH:"#d97706",DIAGNOSIS:"#7c3aed",PLANNING:"#0891b2",FORECAST:"#475569",FINANCE:"#059669",HR:"#d97706",CREATIVE:"#db2777",NEGOTIATION:"#dc2626",AUTO:"#6366f1"};
                             const _mc = _modeColor[(_s.analysis?.mode||"").toUpperCase()]||"#6366f1";
+                            const _isFinance = (_s.analysis?.mode||"").toUpperCase()==="FINANCE";
+                            if (_isFinance) return (
+                              <div style={{display:"flex",flexDirection:"column",gap:"10px"}}>
+                                <div style={{background:"linear-gradient(135deg,#052e16,#064e3b)",borderRadius:"10px",padding:"12px 16px",borderLeft:"3px solid #10b981"}}>
+                                  <p style={{color:"rgba(255,255,255,0.35)",fontSize:"9px",fontWeight:700,letterSpacing:"0.15em",marginBottom:"5px"}}>📈 MARKET INTELLIGENCE</p>
+                                  <p style={{color:"white",fontWeight:800,fontSize:"13px",lineHeight:1.5}}>{_s.summary}</p>
+                                </div>
+                                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"8px"}}>
+                                  <div style={{background:"rgba(16,185,129,0.08)",border:"1px solid rgba(16,185,129,0.25)",borderRadius:"10px",padding:"10px"}}>
+                                    <p style={{color:"#10b981",fontSize:"9px",fontWeight:800,letterSpacing:"0.12em",marginBottom:"6px"}}>🎯 注目シグナル</p>
+                                    {(_s.cards?.current||[]).map((c:string,i:number)=>(<p key={i} style={{color:"#064e3b",fontSize:"10px",marginBottom:"4px",lineHeight:1.4,fontWeight:600}}>▸ {c}</p>))}
+                                  </div>
+                                  <div style={{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.25)",borderRadius:"10px",padding:"10px"}}>
+                                    <p style={{color:"#ef4444",fontSize:"9px",fontWeight:800,letterSpacing:"0.12em",marginBottom:"6px"}}>⚠️ リスク監視</p>
+                                    {(_s.cards?.risk||[]).map((r:string,i:number)=>(<p key={i} style={{color:"#7f1d1d",fontSize:"10px",marginBottom:"4px",lineHeight:1.4,fontWeight:600}}>▸ {r}</p>))}
+                                  </div>
+                                  <div style={{background:"rgba(99,102,241,0.08)",border:"1px solid rgba(99,102,241,0.25)",borderRadius:"10px",padding:"10px"}}>
+                                    <p style={{color:"#818cf8",fontSize:"9px",fontWeight:800,letterSpacing:"0.12em",marginBottom:"6px"}}>💡 投資アクション</p>
+                                    {(_s.cards?.plan||[]).map((p:string,i:number)=>(<p key={i} style={{color:"#312e81",fontSize:"10px",marginBottom:"4px",lineHeight:1.4,fontWeight:600}}>▸ {p}</p>))}
+                                  </div>
+                                </div>
+                                <div style={{background:"rgba(0,0,0,0.04)",borderRadius:"10px",padding:"10px 14px",display:"flex",gap:"16px",flexWrap:"wrap" as const}}>
+                                  <span style={{fontSize:"10px",color:"#10b981",fontWeight:700}}>📊 {_s.analysis?.type||"投資分析"}</span>
+                                  <span style={{fontSize:"10px",color:_s.analysis?.urgency==="高"?"#ef4444":"#d97706",fontWeight:700}}>緊急度: {_s.analysis?.urgency}</span>
+                                  <span style={{fontSize:"10px",color:"#6366f1",fontWeight:700}}>重要度: {_s.analysis?.importance}</span>
+                                  {hasInvestSignal ? (
+                                    <button onClick={()=>{const _match=(_s.summary||"").match(/\d{4}/);const _q=_match?_match[0]:(_s.summary||"").slice(0,15);window.location.href=`/diagnosis?tab=investment&stock=${encodeURIComponent(_q)}`;}} style={{fontSize:"10px",color:"#059669",fontWeight:700,background:"rgba(5,150,105,0.1)",border:"1px solid rgba(5,150,105,0.3)",borderRadius:"6px",padding:"2px 8px",cursor:"pointer"}}>📈 投資シグナル分析 🔍 個別分析</button>
+                                  ) : (
+                                    <span style={{fontSize:"10px",color:"#ef4444",fontWeight:600}}>📈 機能未開放のためYsconsultingofficeにご連絡ください</span>
+                                  )}
+                                </div>
+                                {(_s.actions||[]).length>0&&<div style={{display:"flex",gap:"6px",flexWrap:"wrap" as const}}>{(_s.actions||[]).map((a:string,i:number)=>(<span key={i} style={{background:"rgba(16,185,129,0.1)",border:"1px solid rgba(16,185,129,0.3)",borderRadius:"99px",padding:"4px 10px",fontSize:"10px",color:"#10b981",fontWeight:600}}>→ {a}</span>))}</div>}
+                              </div>
+                            );
                             return (
                               <div style={{display:"flex",flexDirection:"column",gap:"10px"}}>
                                 {/* 結論バー */}
@@ -1031,7 +1085,7 @@ export default function ChatPage() {
               {id:"OPS",       label:"OPS",       color:"#0f766e", keywords:["業務","オペレーション","効率","工数","標準化","自動化","改善","無駄","ボトルネック","フロー整理","作業","手作業","システム化","デジタル化","DX","省力化","時短","生産性"]},
               {id:"TECH",      label:"TECH",      color:"#1d4ed8", keywords:["技術","エンジニア","システム","アーキテクチャ","実装","API","DB","インフラ","開発","コード","プログラム","ソフトウェア","ハードウェア","クラウド","サーバー","セキュリティ","バグ","エラー"]},
             ];
-            if (input.trim().length < 8) return null;
+            if (input.trim().length < 2) return null;
             const _txt = input.toLowerCase();
             const _matched = _ALL_MODES.filter(m => m.keywords.some(k => _txt.includes(k))).slice(0, 4);
             if (_matched.length === 0) return null;

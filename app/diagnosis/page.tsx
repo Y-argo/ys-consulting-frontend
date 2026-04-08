@@ -59,6 +59,8 @@ function DiagnosisPageInner() {
   useEffect(() => {
     setMounted(true);
     const urlTab = searchParams.get("tab") as TabId;
+    const urlStock = searchParams.get("stock");
+    if (urlStock) setStockSearch(decodeURIComponent(urlStock));
     if (urlTab) {
       setTab(urlTab);
       localStorage.setItem("diag_tab", urlTab);
@@ -190,12 +192,12 @@ function DiagnosisPageInner() {
     } catch(e:unknown) { setError(e instanceof Error ? e.message : "エラー"); setGraphLoading(false); }
   }
   async function fetchStockAnalysis() {
-    if (!getInput("investment").trim()) return;
+    if (!stockSearch.trim()) return;
     setStockLoading(true); setError("");  setStockResult(null);
     try {
       const res = await fetch(`${API_BASE}/api/investment/stock_analysis`, {
         method:"POST", headers:authHeaders(),
-        body:JSON.stringify({query: getInput("investment").trim()})
+        body:JSON.stringify({query: stockSearch.trim()})
       });
       if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail||"エラー"); }
       const d = await res.json();
@@ -736,17 +738,17 @@ function DiagnosisPageInner() {
               <div style={{display:"flex",gap:"8px",marginBottom:"12px",flexWrap:"wrap" as const}}>
                 <input
                   type="text"
-                  value={inputText}
-                  onChange={e=>setInputText(e.target.value)}
+                  value={stockSearch}
+                  onChange={e=>setStockSearch(e.target.value)}
                   placeholder="銘柄コードまたは社名を入力（例: 9984 ソフトバンク）"
                   style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.2)",borderRadius:"10px",padding:"8px 14px",fontSize:"13px",color:"white",flex:1,minWidth:"200px"}}
                 />
                 <button
                   onClick={fetchStockAnalysis}
-                  disabled={stockLoading||!inputText.trim()}
+                  disabled={stockLoading||!stockSearch.trim()}
                   style={{background:"rgba(255,255,255,0.12)",border:"1px solid rgba(255,255,255,0.2)",borderRadius:"10px",padding:"8px 16px",color:"white",fontSize:"12px",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap" as const}}
                   className="hover:bg-white/20 transition-all disabled:opacity-50">
-                  🔍 個別分析
+                  {stockLoading ? "⏳ 分析中..." : "🔍 個別分析"}
                 </button>
               </div>
               <button onClick={()=>{if(!analysisLoading)fetchInvestmentAnalysis();}} style={{background:"linear-gradient(135deg,#3b82f6,#6366f1)",borderRadius:"12px",padding:"10px 24px",border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(59,130,246,0.4)",opacity:analysisLoading?0.7:1,pointerEvents:"auto" as const}}

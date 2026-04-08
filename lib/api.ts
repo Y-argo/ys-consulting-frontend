@@ -91,12 +91,13 @@ export async function sendMessage(
   message: string,
   chat_id: string = "main",
   ai_tier: string = "core",
-  purpose_mode: string = "auto"
+  purpose_mode: string = "auto",
+  chat_mode: string = "consult"
 ): Promise<SendResult> {
   const res = await fetch(`${API_BASE}/api/chat/send`, {
     method: "POST",
     headers: authHeaders(),
-    body: JSON.stringify({ message, chat_id, ai_tier, purpose_mode }),
+    body: JSON.stringify({ message, chat_id, ai_tier, purpose_mode, chat_mode }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
