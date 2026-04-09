@@ -52,6 +52,7 @@ import {
   getStoredUser, logout, getUserStats, getFcReport, getMyFeatures,
   getRankupTips, getManual, getUserGuide, getUsageLogs,
   getCustomPrompt, saveCustomPrompt, getHeaderConfig, listInquiries, getTheme,
+  getUserPlan,
   UserStats, ThemeConfig,
 } from "@/lib/api";
 type Tab = "overview"|"metrics"|"fc"|"dm"|"logs"|"rankup"|"manual"|"guide"|"about"|"cookie"|"settings"|"gallery";
@@ -78,6 +79,7 @@ export default function MyPage() {
   const [apexEnabled, setApexEnabled] = useState(false);
   const [features, setFeatures] = useState<Record<string,boolean>>({});
   const [headerCfg, setHeaderCfg] = useState<Record<string,string>>({});
+  const [currentPlan, setCurrentPlan] = useState<string>("");
   const [inquiryUnread, setInquiryUnread] = useState(0);
   const [theme, setTheme] = useState<ThemeConfig|null>(null);
   const [settings, setSettings] = useState({
@@ -96,6 +98,7 @@ export default function MyPage() {
   useEffect(() => {
     const user = getStoredUser();
     if (!user) { router.push("/"); return; }
+    getUserPlan().then((p) => setCurrentPlan(p));
     setUid(user.uid);
     getUserStats().then(setStats);
     getMyFeatures().then(f=>{ setUltraEnabled(!!f.ascend_ultra); setApexEnabled(!!f.ascend_apex); setFeatures(f); });
@@ -300,6 +303,20 @@ export default function MyPage() {
               ))}
             </div>
             <p className="text-xs text-center pb-1" style={{color:stats?.is_unlimited ? "#22c55e" : stats?.expires_at ? (new Date(stats.expires_at) < new Date() ? "#ef4444" : "#6b7280") : "#6b7280"}}>📅 {stats?.is_unlimited ? "無期限" : stats?.expires_at ? stats.expires_at.slice(0,10)+"まで" : "有効期限未設定"}</p>
+            <div style={{background:"#f0f4ff",border:"1px solid #c7d2fe",borderRadius:"10px",padding:"10px 14px",marginBottom:"8px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div>
+                <div style={{fontSize:"10px",color:"#6b7280",marginBottom:"2px"}}>現在のプラン</div>
+                <div style={{fontSize:"14px",fontWeight:700,color:"#4f46e5"}}>
+                  {{"starter":"STARTER（無料）","standard":"STANDARD","pro":"PRO","apex":"APEX"}[currentPlan] || "未設定"}
+                </div>
+              </div>
+              <button onClick={()=>router.push("/plan")} style={{background:"#4f46e5",color:"#fff",border:"none",borderRadius:"8px",padding:"6px 12px",fontSize:"11px",fontWeight:700,cursor:"pointer"}}>
+                詳細 →
+              </button>
+            </div>
+            <button onClick={()=>router.push("/plan")} className="w-full text-xs py-2 transition-colors" style={{color:"#4f46e5",textDecoration:"underline",background:"none",border:"none",cursor:"pointer"}}>
+              📦 プランガイドを見る
+            </button>
             <button onClick={()=>{logout();router.push("/");}} className="w-full text-xs py-3 transition-colors" style={{color:C.textMuted}}>ログアウト</button>
           </div>
         )}

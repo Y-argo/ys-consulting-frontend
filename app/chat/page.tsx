@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 const ReactMarkdown = dynamic(() => import("react-markdown"), { ssr: false, loading: () => null });
 import {
   getStoredUser, logout, sendMessage, loadHistory, listSessions, newSession,
-  getMyFeatures, getUserStats, getUsageLogs, deleteSession, renameSession,
+  getMyFeatures, getUserStats, getUsageLogs, deleteSession, renameSession, getUserPlan,
   getHeaderConfig, getFcReport, getRankupTips, getManual, getUserGuide,
   getSuggestedQuestions, saveFeedback, uploadAttachment,
   getChatExamples, getPurposeModes, getTheme,
@@ -56,6 +56,7 @@ export default function ChatPage() {
   const [apexEnabled, setApexEnabled] = useState(false);
   const [hasInvestSignal, setHasInvestSignal] = useState(false);
   const [stats, setStats] = useState<UserStats|null>(null);
+  const [currentPlan, setCurrentPlan] = useState<string>("");
   const [usageLogs, setUsageLogs] = useState<{prompt:string;timestamp:string}[]>([]);
   const [purposeMode, setPurposeMode] = useState("AUTO");
   const [chatMode, setChatMode] = useState<"talk"|"consult">("consult");
@@ -108,6 +109,7 @@ export default function ChatPage() {
       else setAiTier("core");
     });
     getUserStats().then(setStats);
+    getUserPlan().then(setCurrentPlan);
     getHeaderConfig().then(setHeaderCfg);
     getFcReport().then(setFcData);
     getTheme().then(t => {
@@ -556,6 +558,15 @@ export default function ChatPage() {
                 }
                 return null;
               })()}
+              {currentPlan && ["starter","standard","pro","apex"].includes(currentPlan) && (
+                <div
+                  onClick={()=>router.push("/plan")}
+                  className="px-3 py-1.5 text-xs cursor-pointer"
+                  style={{color:{"starter":"#6b7280","standard":"#3b82f6","pro":"#8b5cf6","apex":"#f59e0b"}[currentPlan]||"#6b7280",fontWeight:700}}
+                >
+                  📦 {({"starter":"STARTER","standard":"STANDARD","pro":"PRO","apex":"APEX"}[currentPlan]||"")}
+                </div>
+              )}
               <button onClick={()=>{logout();router.push("/");}} className="w-full text-left text-xs px-3 py-1.5 transition-all hover:text-red-500" style={{color:C.textMuted,borderRadius:"10px"}}>
                 ← ログアウト
               </button>

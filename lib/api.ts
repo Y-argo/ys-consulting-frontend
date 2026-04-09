@@ -504,3 +504,11 @@ export async function sendInvestMessage(
     throw e;
   } finally { clearTimeout(timer); }
 }
+
+export async function getUserPlan(): Promise<string> {
+  try {
+    const res = await fetch(`${API_BASE}/api/user/plan`, { headers: authHeaders() });
+    const d = await res.json();
+    return d.plan || "";
+  } catch { return ""; }
+}

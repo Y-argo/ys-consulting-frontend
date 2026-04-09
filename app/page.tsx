@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { loginUser, registerUser } from "@/lib/api";
 
@@ -8,6 +8,13 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC
 export default function LoginPage() {
   const router = useRouter();
   const [mode, setMode] = useState<"login"|"register"|"contact">("login");
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const p = new URLSearchParams(window.location.search);
+      const m = p.get("mode");
+      if (m === "contact" || m === "register") setMode(m);
+    }
+  }, []);
   const [contactName, setContactName] = useState("");
   const [contactMsg, setContactMsg] = useState("");
   const [contactDone, setContactDone] = useState(false);
@@ -226,8 +233,17 @@ export default function LoginPage() {
             )}
           </div>
         )}
+        {/* プランガイドボタン */}
+        <div className="text-center mt-5">
+          <button
+            onClick={() => router.push("/plan")}
+            className="text-xs text-blue-400 hover:text-blue-300 underline transition-colors"
+          >
+            📦 ASCENDのプランガイドを見る
+          </button>
+        </div>
         {/* フッター */}
-        <p className="text-center text-xs text-gray-700 mt-6">
+        <p className="text-center text-xs text-gray-700 mt-4">
           ※ 本AIの出力は意思決定支援のための提案です。投資・法務・医療等の重要事項は専門家にご確認ください。
         </p>
       </div>
