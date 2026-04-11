@@ -307,7 +307,7 @@ export default function MyPage() {
               <div>
                 <div style={{fontSize:"10px",color:"#6b7280",marginBottom:"2px"}}>現在のプラン</div>
                 <div style={{fontSize:"14px",fontWeight:700,color:"#4f46e5"}}>
-                  {{"starter":"STARTER（無料）","standard":"STANDARD","pro":"PRO","apex":"APEX"}[currentPlan] || "未設定"}
+                  {{"starter":"STARTER（無料）","standard":"STANDARD","pro":"PRO","apex":"APEX","ultra_admin":"ULTRA管理者","ultra_member":"ULTRAメンバー"}[currentPlan] || "未設定"}
                 </div>
               </div>
               <button onClick={()=>router.push("/plan")} style={{background:"#4f46e5",color:"#fff",border:"none",borderRadius:"8px",padding:"6px 12px",fontSize:"11px",fontWeight:700,cursor:"pointer"}}>

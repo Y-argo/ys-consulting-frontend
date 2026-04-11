@@ -94,6 +94,25 @@ const PLANS = [
     ],
     locked: [],
   },
+  {
+    key: "ultra",
+    name: "ULTRA",
+    price: "¥300,000",
+    color: "#e11d48",
+    badge: "顧問契約",
+    engine: "Apex",
+    modes: "全19モード対応",
+    features: [
+      "ASCEND全機能完全解放",
+      "Ys Consulting Office顧問契約付き",
+      "社員10名まで個別アカウント発行",
+      "企業テナント共有（RAG・診断履歴）",
+      "📊 月次戦術レポート提出",
+      "新機能先行利用",
+      "月次ミーティング・直接支援",
+    ],
+    locked: [],
+  },
 ];
 
 const PLAN_LABELS: Record<string, string> = {
@@ -101,6 +120,9 @@ const PLAN_LABELS: Record<string, string> = {
   standard: "STANDARD",
   pro: "PRO",
   apex: "APEX",
+  ultra: "ULTRA",
+  ultra_admin: "ULTRA管理者",
+  ultra_member: "ULTRAメンバー",
 };
 
 export default function PlanPage() {
@@ -170,14 +192,14 @@ export default function PlanPage() {
                   現在のプラン
                 </div>
               )}
-              {plan.key === "apex" && !isCurrent && (
-                <div style={{ position: "absolute", top: -14, left: "50%", transform: "translateX(-50%)", background: "#f59e0b", color: "#000", borderRadius: 20, padding: "3px 14px", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
-                  最上位
+              {(plan.key === "apex" || plan.key === "ultra") && !isCurrent && (
+                <div style={{ position: "absolute", top: -14, left: "50%", transform: "translateX(-50%)", background: plan.key === "ultra" ? "#e11d48" : "#f59e0b", color: plan.key === "ultra" ? "#fff" : "#000", borderRadius: 20, padding: "3px 14px", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
+                  {plan.key === "ultra" ? "顧問契約" : "最上位"}
                 </div>
               )}
 
               <div style={{ color: plan.color, fontWeight: 800, fontSize: 18, letterSpacing: 1, marginBottom: 4 }}>{plan.name}</div>
-              <div style={{ fontSize: 30, fontWeight: 800, marginBottom: 4 }}>{plan.price}<span style={{ fontSize: 14, color: "#64748b", fontWeight: 400 }}>/月</span></div>
+              <div style={{ fontSize: 30, fontWeight: 800, marginBottom: 4 }}>{plan.price}<span style={{ fontSize: 14, color: "#64748b", fontWeight: 400 }}>{plan.key === "starter" ? "/新規7日間" : plan.key === "ultra" ? "/月〜（要相談）" : "/月"}</span></div>
               <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16, paddingBottom: 16, borderBottom: "1px solid #1e293b" }}>
                 🤖 {plan.engine}<br />
                 ⚡ {plan.modes}

@@ -558,13 +558,13 @@ export default function ChatPage() {
                 }
                 return null;
               })()}
-              {currentPlan && ["starter","standard","pro","apex"].includes(currentPlan) && (
+              {currentPlan && ["starter","standard","pro","apex","ultra_admin","ultra_member"].includes(currentPlan) && (
                 <div
                   onClick={()=>router.push("/plan")}
                   className="px-3 py-1.5 text-xs cursor-pointer"
-                  style={{color:{"starter":"#6b7280","standard":"#3b82f6","pro":"#8b5cf6","apex":"#f59e0b"}[currentPlan]||"#6b7280",fontWeight:700}}
+                  style={{color:{"starter":"#6b7280","standard":"#3b82f6","pro":"#8b5cf6","apex":"#f59e0b","ultra_admin":"#e11d48","ultra_member":"#e11d48"}[currentPlan]||"#6b7280",fontWeight:700}}
                 >
-                  📦 {({"starter":"STARTER","standard":"STANDARD","pro":"PRO","apex":"APEX"}[currentPlan]||"")}
+                  📦 {({"starter":"STARTER","standard":"STANDARD","pro":"PRO","apex":"APEX","ultra_admin":"ULTRA管理者","ultra_member":"ULTRAメンバー"}[currentPlan]||"")}
                 </div>
               )}
               <button onClick={()=>{logout();router.push("/");}} className="w-full text-left text-xs px-3 py-1.5 transition-all hover:text-red-500" style={{color:C.textMuted,borderRadius:"10px"}}>
