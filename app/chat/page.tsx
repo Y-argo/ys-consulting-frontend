@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 const ReactMarkdown = dynamic(() => import("react-markdown"), { ssr: false, loading: () => null });
+import remarkGfm from "remark-gfm";
 import {
   getStoredUser, logout, sendMessage, loadHistory, listSessions, newSession,
   getMyFeatures, getUserStats, getUsageLogs, deleteSession, renameSession, getUserPlan,
@@ -11,7 +12,9 @@ import {
   getChatExamples, getPurposeModes, getTheme,
   tableCommand, lgbmPredict, TableResult,
   Message, SessionInfo, UserStats, AttachmentResult, ThemeConfig,
+  getUserAiSettings,
 } from "@/lib/api";
+import AdBanner from "@/components/AdBanner";
 
 type Modal = "none"|"rankup"|"manual"|"guide"|"about"|"fc"|"logs"|"mypage"|"rename"|"cookie";
 
@@ -53,6 +56,7 @@ export default function ChatPage() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [aiTier, setAiTier] = useState("core");
   const [ultraEnabled, setUltraEnabled] = useState(false);
+  const [conversationStarters, setConversationStarters] = useState<string[]>([]);
   const [apexEnabled, setApexEnabled] = useState(false);
   const [hasInvestSignal, setHasInvestSignal] = useState(false);
   const [stats, setStats] = useState<UserStats|null>(null);
@@ -106,8 +110,8 @@ export default function ChatPage() {
       const savedTier = localStorage.getItem("ascend_ai_tier_default");
       if (savedTier === "ultra" && hasUltra) setAiTier("ultra");
       else if (savedTier === "apex" && hasApex) setAiTier("apex");
-      else setAiTier("core");
     });
+    getUserAiSettings().then(d=>{ if(d.conversation_starters?.length) setConversationStarters(d.conversation_starters); });
     getUserStats().then(setStats);
     getUserPlan().then(setCurrentPlan);
     getHeaderConfig().then(setHeaderCfg);
@@ -402,8 +406,8 @@ export default function ChatPage() {
 
         {/* LEFT SIDEBAR */}
         {leftOpen && (
-          <aside style={{background:C.sidebar, borderRight:`1px solid ${C.border}`, width:"220px", overflowY:"auto", scrollbarWidth:"none"}} className="flex-shrink-0 flex flex-col [&::-webkit-scrollbar]:hidden">
-            <div className="p-3 space-y-2" style={{minHeight:"min-content"}}>
+          <aside style={{background:C.sidebar, borderRight:`1px solid ${C.border}`, width:"220px", display:"flex", flexDirection:"column", overflowY:"auto", scrollbarWidth:"none", msOverflowStyle:"none"}} className="flex-shrink-0 [&::-webkit-scrollbar]:hidden">
+            <div className="p-3 space-y-2">
 
               {/* ランクスコア プレミアム */}
               {stats && (() => {
@@ -571,6 +575,9 @@ export default function ChatPage() {
                 ← ログアウト
               </button>
             </div>
+          <div style={{background:C.sidebar,padding:"8px"}}>
+            <AdBanner position="sidebar" />
+          </div>
           </aside>
         )}
 
@@ -578,19 +585,7 @@ export default function ChatPage() {
         <div className="flex-1 flex flex-col min-w-0">
           {/* モードバー */}
           <div style={{background:C.card, borderBottom:`1px solid ${C.border}`, overflowX:"auto", scrollbarWidth:"none"}} className="flex items-center gap-1.5 px-4 py-2 flex-shrink-0 [&::-webkit-scrollbar]:hidden">
-            {/* 会話/相談トグル */}
-            <div className="flex items-center flex-shrink-0 mr-2" style={{background:"rgba(0,0,0,0.04)",borderRadius:"10px",padding:"2px"}}>
-              <button onClick={()=>setChatMode("talk")}
-                style={{borderRadius:"8px",fontSize:"11px",fontWeight:700,padding:"4px 10px",transition:"all 0.2s",
-                  background:chatMode==="talk"?"#6366f1":"transparent",
-                  color:chatMode==="talk"?"white":C.textMuted}}
-              >💬 会話</button>
-              <button onClick={()=>setChatMode("consult")}
-                style={{borderRadius:"8px",fontSize:"11px",fontWeight:700,padding:"4px 10px",transition:"all 0.2s",
-                  background:chatMode==="consult"?`linear-gradient(135deg,${C.primary},${C.primary2})`:"transparent",
-                  color:chatMode==="consult"?"white":C.textMuted}}
-              >🎯 相談</button>
-            </div>
+
             <span style={{fontSize:"10px",fontWeight:700,color:C.textMuted,letterSpacing:"0.12em",whiteSpace:"nowrap",flexShrink:0,paddingRight:"4px"}}>モード選択</span>
             {purposeModes.map(m=>(
               <button key={m.id} onClick={()=>setPurposeMode(m.id)}
@@ -747,7 +742,8 @@ export default function ChatPage() {
                           } catch {}
                           // 構造化カードUI
                           if (m.structured) {
-                            const _s = m.structured as {summary:string;cards:{current:string[];risk:string[];plan:string[]};analysis:{type:string;urgency:string;importance:string;mode:string};actions:string[];value_message:string};
+                            const _s = m.structured as {summary:string;cards:any;question_type?:string;analysis:{type:string;urgency:string;importance:string;mode:string};actions:string[];value_message:string};
+                            const _cl_cards:Array<{title:string;items:string[];color:string}> = Array.isArray(_s.cards)?_s.cards.map((c:{title:string;items:string[]},i:number)=>({title:c.title,items:c.items||[],color:["#0891b2","#dc2626","#059669","#6366f1","#d97706"][i%5]})):[{title:"現状整理",items:_s.cards?.current||[],color:"#0891b2"},{title:"問題・リスク",items:_s.cards?.risk||[],color:"#dc2626"},{title:"推奨方針",items:_s.cards?.plan||[],color:"#059669"}];
                             const _modeColor: Record<string,string> = {NUMERIC:"#059669",STRATEGY:"#6366f1",CONTROL:"#0891b2",RISK:"#dc2626",MARKETING:"#db2777",GROWTH:"#d97706",DIAGNOSIS:"#7c3aed",PLANNING:"#0891b2",FORECAST:"#475569",FINANCE:"#059669",HR:"#d97706",CREATIVE:"#db2777",NEGOTIATION:"#dc2626",AUTO:"#6366f1"};
                             const _mc = _modeColor[(_s.analysis?.mode||"").toUpperCase()]||"#6366f1";
                             const _isFinance = (_s.analysis?.mode||"").toUpperCase()==="FINANCE";
@@ -793,17 +789,7 @@ export default function ChatPage() {
                                 </div>
                                 {/* 3分割カード */}
                                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"6px"}}>
-                                  {([["現状整理","#0891b2",_s.cards?.current],["問題・リスク","#dc2626",_s.cards?.risk],["推奨方針","#059669",_s.cards?.plan]] as [string,string,string[]][]).map(([title,color,items])=>(
-                                    <div key={title} style={{background:`${color}08`,border:`1px solid ${color}22`,borderRadius:"10px",padding:"10px 11px"}}>
-                                      <p style={{color,fontSize:"10px",fontWeight:800,marginBottom:"6px",letterSpacing:"0.04em"}}>{title}</p>
-                                      {(items||[]).map((item,i)=>(
-                                        <div key={i} style={{display:"flex",gap:"4px",marginBottom:"4px",alignItems:"flex-start"}}>
-                                          <span style={{color,fontSize:"9px",marginTop:"3px",flexShrink:0}}>▸</span>
-                                          <p style={{color:C.textSub,fontSize:"11px",lineHeight:1.5}}>{item}</p>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ))}
+                                  {_cl_cards.map(({title,items,color}:{title:string;items:string[];color:string})=>(<div key={title} style={{background:`${color}08`,border:`1px solid ${color}22`,borderRadius:"10px",padding:"10px 11px"}}><p style={{color,fontSize:"10px",fontWeight:800,marginBottom:"6px",letterSpacing:"0.04em"}}>{title}</p>{(items||[]).map((item:string,i:number)=>(<div key={i} style={{display:"flex",gap:"4px",marginBottom:"4px",alignItems:"flex-start"}}><span style={{color,fontSize:"9px",marginTop:"3px",flexShrink:0}}>▸</span><p style={{color:C.textSub,fontSize:"11px",lineHeight:1.5}}>{item}</p></div>))}</div>))}
                                 </div>
                                 {/* AI解析ボックス */}
                                 <div style={{background:"linear-gradient(135deg,rgba(79,70,229,0.05),rgba(124,58,237,0.03))",border:"1px solid rgba(79,70,229,0.12)",borderRadius:"10px",padding:"10px 14px"}}>
@@ -837,7 +823,7 @@ export default function ChatPage() {
                                   <div style={{display:"flex",flexWrap:"wrap" as const,gap:"4px"}}>
                                     {([["🏗️","構造診断","structure","事業・組織の構造を解剖しボトルネックを特定"],["🎯","課題仮説","issue","状況から課題仮説を優先度付きで生成"],["⚖️","比較分析","comparison","複数案を多軸で客観比較し推奨案を提示"],["⚡","矛盾検知","contradiction","戦略・方針間の矛盾と整合性を検証"],["📋","実行計画","execution","フェーズ別・期限付きアクションプランを生成"]] as [string,string,string,string][]).map(([icon,label,tab,desc])=>(
                                       <button key={tab} onClick={()=>{
-                                        const _inputText = [_s.summary,"\n\n【現状】\n"+(_s.cards?.current||[]).join("\n"),"\n\n【問題・リスク】\n"+(_s.cards?.risk||[]).join("\n"),"\n\n【推奨方針】\n"+(_s.cards?.plan||[]).join("\n")].join("");
+                                        const _inputText = Array.isArray(_s.cards)?[_s.summary,..._s.cards.map((c:{title:string;items:string[]})=>`\n\n【${c.title}】\n`+(c.items||[]).join("\n"))].join(""):[_s.summary,"\n\n【現状】\n"+(_s.cards?.current||[]).join("\n"),"\n\n【問題・リスク】\n"+(_s.cards?.risk||[]).join("\n"),"\n\n【推奨方針】\n"+(_s.cards?.plan||[]).join("\n")].join("");
                                         try{sessionStorage.setItem("diag_input_"+tab, _inputText);}catch(_e){}
                                         window.location.href="/diagnosis?tab="+tab;
                                       }}
@@ -861,7 +847,8 @@ export default function ChatPage() {
                           }
                           // 構造化カードUI
                           if (m.structured) {
-                            const _s = m.structured as {summary:string;cards:{current:string[];risk:string[];plan:string[]};analysis:{type:string;urgency:string;importance:string;mode:string};actions:string[];value_message:string};
+                            const _s = m.structured as {summary:string;cards:any;question_type?:string;analysis:{type:string;urgency:string;importance:string;mode:string};actions:string[];value_message:string};
+                            const _cl_cards:Array<{title:string;items:string[];color:string}> = Array.isArray(_s.cards)?_s.cards.map((c:{title:string;items:string[]},i:number)=>({title:c.title,items:c.items||[],color:["#0891b2","#dc2626","#059669","#6366f1","#d97706"][i%5]})):[{title:"現状整理",items:_s.cards?.current||[],color:"#0891b2"},{title:"問題・リスク",items:_s.cards?.risk||[],color:"#dc2626"},{title:"推奨方針",items:_s.cards?.plan||[],color:"#059669"}];
                             const _modeColor: Record<string,string> = {NUMERIC:"#059669",STRATEGY:"#6366f1",CONTROL:"#0891b2",RISK:"#dc2626",MARKETING:"#db2777",GROWTH:"#d97706",DIAGNOSIS:"#7c3aed",PLANNING:"#0891b2",FORECAST:"#475569",FINANCE:"#059669",HR:"#d97706",CREATIVE:"#db2777",NEGOTIATION:"#dc2626",AUTO:"#6366f1"};
                             const _mc = _modeColor[(_s.analysis?.mode||"").toUpperCase()]||"#6366f1";
                             return (
@@ -871,17 +858,7 @@ export default function ChatPage() {
                                   <p style={{color:"white",fontSize:"13px",fontWeight:700,lineHeight:1.6}}>{_s.summary}</p>
                                 </div>
                                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"6px"}}>
-                                  {([["現状整理","#0891b2",_s.cards?.current],["問題・リスク","#dc2626",_s.cards?.risk],["推奨方針","#059669",_s.cards?.plan]] as [string,string,string[]][]).map(([title,color,items])=>(
-                                    <div key={title} style={{background:`${color}08`,border:`1px solid ${color}22`,borderRadius:"10px",padding:"10px 11px"}}>
-                                      <p style={{color,fontSize:"10px",fontWeight:800,marginBottom:"6px",letterSpacing:"0.04em"}}>{title}</p>
-                                      {(items||[]).map((item,i)=>(
-                                        <div key={i} style={{display:"flex",gap:"4px",marginBottom:"4px",alignItems:"flex-start"}}>
-                                          <span style={{color,fontSize:"9px",marginTop:"3px",flexShrink:0}}>▸</span>
-                                          <p style={{color:C.textSub,fontSize:"11px",lineHeight:1.5}}>{item}</p>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ))}
+                                  {_cl_cards.map(({title,items,color}:{title:string;items:string[];color:string})=>(<div key={title} style={{background:`${color}08`,border:`1px solid ${color}22`,borderRadius:"10px",padding:"10px 11px"}}><p style={{color,fontSize:"10px",fontWeight:800,marginBottom:"6px",letterSpacing:"0.04em"}}>{title}</p>{(items||[]).map((item:string,i:number)=>(<div key={i} style={{display:"flex",gap:"4px",marginBottom:"4px",alignItems:"flex-start"}}><span style={{color,fontSize:"9px",marginTop:"3px",flexShrink:0}}>▸</span><p style={{color:C.textSub,fontSize:"11px",lineHeight:1.5}}>{item}</p></div>))}</div>))}
                                 </div>
                                 <div style={{background:"linear-gradient(135deg,rgba(79,70,229,0.05),rgba(124,58,237,0.03))",border:"1px solid rgba(79,70,229,0.12)",borderRadius:"10px",padding:"10px 14px"}}>
                                   <p style={{color:C.primary,fontSize:"9px",fontWeight:800,letterSpacing:"0.15em",marginBottom:"7px"}}>AI ANALYSIS</p>
@@ -916,9 +893,20 @@ export default function ChatPage() {
                             );
                           }
                           // フォールバック: 通常Markdown
+                          const _fixMd = (s:string) => {
+                            // 壊れたMarkdown表セパレーター行を正規化
+                            return s.split("\n").map((line:string) => {
+                              // |:---|や|===|や|====|などを| --- |に正規化
+                              if (/^\|(.+)\|$/.test(line.trim()) && /[=:]{2,}|-{4,}/.test(line)) {
+                                const cols = line.split("|").filter((_:string,i:number,a:string[])=>i>0&&i<a.length-1).length;
+                                return "|" + " --- |".repeat(cols);
+                              }
+                              return line;
+                            }).join("\n");
+                          };
                           return (
-                            <div className="prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1.5 [&_td]:text-xs [&_th]:border [&_th]:border-gray-200 [&_th]:px-2 [&_th]:py-1.5 [&_th]:bg-indigo-50 [&_th]:text-xs [&_code]:bg-indigo-50 [&_code]:px-1 [&_code]:rounded [&_code]:text-xs" style={{color:C.textMain}}>
-                              <ReactMarkdown>{m.content}</ReactMarkdown>
+                            <div style={{overflowX:"auto",color:C.textMain}} className="prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_table]:border-collapse [&_table]:min-w-full [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1.5 [&_td]:text-xs [&_td]:whitespace-nowrap [&_th]:border [&_th]:border-gray-200 [&_th]:px-2 [&_th]:py-1.5 [&_th]:bg-indigo-50 [&_th]:text-xs [&_th]:whitespace-nowrap [&_code]:bg-indigo-50 [&_code]:px-1 [&_code]:rounded [&_code]:text-xs">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{_fixMd(m.content)}</ReactMarkdown>
                             </div>
                           );
                         })()}
@@ -1171,20 +1159,42 @@ export default function ChatPage() {
           })()}
           {/* 入力エリア */}
           <div style={{background:C.card, borderTop:`1px solid ${C.border}`, backdropFilter:"blur(12px)"}} className="px-4 py-3 flex-shrink-0">
+            {conversationStarters.length > 0 && (
+              <div className="flex gap-2 mb-2 flex-wrap">
+                {conversationStarters.map((s,i)=>(
+                  <button key={i} type="button" onClick={()=>setInput(s)}
+                    style={{background:`rgba(79,70,229,0.08)`,border:`1px solid rgba(79,70,229,0.2)`,borderRadius:"20px",padding:"4px 12px",fontSize:"11px",color:"#4f46e5",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
             <form onSubmit={handleSend} className="flex gap-2 items-end">
               <input ref={fileRef} type="file" onChange={handleFileChange} className="hidden" accept=".txt,.md,.csv,.pdf,.xlsx,.xls,.json,.py,.js,.ts,.png,.jpg,.jpeg,.webp"/>
               <div style={{background:"rgba(0,0,0,0.02)",border:`1px solid ${C.border}`,borderRadius:"16px",display:"flex",alignItems:"flex-end",gap:"4px",padding:"6px 8px 6px 8px"}} className="flex-1 focus-within:border-indigo-400 transition-all">
-                <button type="button" onClick={()=>fileRef.current?.click()} disabled={attachLoading}
-                  style={{background:"transparent",border:"none",borderRadius:"8px",color:C.textMuted,padding:"6px",flexShrink:0,fontSize:"16px",lineHeight:1,cursor:"pointer"}}
-                  className="hover:text-indigo-500 transition-all disabled:opacity-50">
-                  {attachLoading ? "⏳" : "🗂️"}
-                </button>
-                <button type="button" onClick={()=>setShowInputExample(!showInputExample)}
-                  style={{background:"transparent",border:"none",borderRadius:"8px",color:C.textMuted,padding:"6px",flexShrink:0,fontSize:"16px",lineHeight:1,cursor:"pointer"}}
-                  className="hover:text-yellow-500 transition-all">💡</button>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gridTemplateRows:"1fr 1fr",gap:"2px",flexShrink:0,alignSelf:"center",marginRight:"4px"}}>
+                  <button type="button" onClick={()=>setChatMode("talk")}
+                    style={{borderRadius:"6px",fontSize:"13px",padding:"3px 6px",transition:"all 0.2s",border:"none",cursor:"pointer",lineHeight:1,
+                      background:chatMode==="talk"?"#6366f1":"rgba(0,0,0,0.04)",
+                      boxShadow:chatMode==="talk"?"0 0 0 2px #6366f1":"none"}}
+                    title="会話モード">💬</button>
+                  <button type="button" onClick={()=>setChatMode("consult")}
+                    style={{borderRadius:"6px",fontSize:"13px",padding:"3px 6px",transition:"all 0.2s",border:"none",cursor:"pointer",lineHeight:1,
+                      background:chatMode==="consult"?"#4f46e5":"rgba(0,0,0,0.04)",
+                      boxShadow:chatMode==="consult"?"0 0 0 2px #4f46e5":"none"}}
+                    title="相談モード">🎯</button>
+                  <button type="button" onClick={()=>fileRef.current?.click()} disabled={attachLoading}
+                    style={{borderRadius:"6px",fontSize:"13px",padding:"3px 6px",border:"none",cursor:"pointer",lineHeight:1,background:"rgba(0,0,0,0.04)",color:C.textMuted}}
+                    className="hover:text-indigo-500 transition-all disabled:opacity-50" title="ファイル添付">
+                    {attachLoading ? "⏳" : "🗂️"}
+                  </button>
+                  <button type="button" onClick={()=>setShowInputExample(!showInputExample)}
+                    style={{borderRadius:"6px",fontSize:"13px",padding:"3px 6px",border:"none",cursor:"pointer",lineHeight:1,background:"rgba(0,0,0,0.04)",color:C.textMuted}}
+                    className="hover:text-yellow-500 transition-all" title="入力例">💡</button>
+                </div>
                 <textarea value={input} onChange={e=>setInput(e.target.value)}
                   onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();handleSend(e as unknown as React.FormEvent);}}}
-                  disabled={loading} placeholder="コンサルタントに相談... (Shift+Enterで改行)"
+                  disabled={loading} placeholder={chatMode==="talk" ? "💬 会話モードでコンサルタントに相談... (Shift+Enterで改行)" : "🎯 相談モードでコンサルタントに相談... (Shift+Enterで改行)"}
                   rows={1} style={{background:"transparent",resize:"none",minHeight:"36px",maxHeight:"160px",color:C.textMain,flex:1}}
                   className="text-sm px-2 py-1.5 focus:outline-none placeholder-gray-400 disabled:opacity-50 leading-relaxed"
                 />
@@ -1214,7 +1224,7 @@ export default function ChatPage() {
             <div className="flex-1 overflow-y-auto px-6 py-5">
               {(modal==="rankup"||modal==="manual"||modal==="guide") && (
                 <div className="prose prose-sm max-w-none [&_table]:border-collapse [&_td]:border [&_td]:border-gray-200 [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:border-gray-200 [&_th]:px-3 [&_th]:py-2 [&_th]:bg-indigo-50" style={{color:C.textMain}}>
-                  <ReactMarkdown>{modalContent}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{modalContent}</ReactMarkdown>
                 </div>
               )}
               {modal==="rename" && (

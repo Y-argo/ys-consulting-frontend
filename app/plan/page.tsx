@@ -91,6 +91,7 @@ const PLANS = [
       "ASCEND Apex（最上位AIエンジン）",
       "個人相談・画像生成・ギャラリー",
       "診断タブ全8種（投資シグナルタブ含む）",
+      "🤖 ユーザー専用AI設定（説明・指示・会話のきっかけ・知識ファイル）",
     ],
     locked: [],
   },
@@ -110,6 +111,7 @@ const PLANS = [
       "📊 月次戦術レポート提出",
       "新機能先行利用",
       "月次ミーティング・直接支援",
+      "🤖 ユーザー専用AI設定（説明・指示・会話のきっかけ・知識ファイル）",
     ],
     locked: [],
   },
@@ -134,7 +136,10 @@ export default function PlanPage() {
     setMounted(true);
     const user = getStoredUser();
     if (user) {
-      getUserPlan().then((p) => setCurrentPlan(p));
+      getUserPlan().then((p) => {
+        setCurrentPlan(p);
+
+      });
     }
   }, []);
 

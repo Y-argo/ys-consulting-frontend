@@ -52,9 +52,10 @@ import {
   getStoredUser, logout, getUserStats, getFcReport, getMyFeatures,
   getRankupTips, getManual, getUserGuide, getUsageLogs,
   getCustomPrompt, saveCustomPrompt, getHeaderConfig, listInquiries, getTheme,
-  getUserPlan,
+  getUserPlan, getUserAiSettings, saveUserAiSettings, getUserKnowledgeList, uploadUserKnowledge, deleteUserKnowledge,
   UserStats, ThemeConfig,
 } from "@/lib/api";
+import AdBanner from "@/components/AdBanner";
 type Tab = "overview"|"metrics"|"fc"|"dm"|"logs"|"rankup"|"manual"|"guide"|"about"|"cookie"|"settings"|"gallery";
 const C = {
   bg:"#f8f9fc", card:"#ffffff", primary:"#4f46e5", primary2:"#7c3aed",
@@ -81,6 +82,12 @@ export default function MyPage() {
   const [headerCfg, setHeaderCfg] = useState<Record<string,string>>({});
   const [currentPlan, setCurrentPlan] = useState<string>("");
   const [inquiryUnread, setInquiryUnread] = useState(0);
+  const [aiDescription, setAiDescription] = useState("");
+  const [aiStarters, setAiStarters] = useState<string[]>([]);
+  const [aiStartersText, setAiStartersText] = useState("");
+  const [knowledgeFiles, setKnowledgeFiles] = useState<{source_id:string;title:string;link_id:string}[]>([]);
+  const [aiSettingsSaved, setAiSettingsSaved] = useState(false);
+  const [knowledgeUploading, setKnowledgeUploading] = useState(false);
   const [theme, setTheme] = useState<ThemeConfig|null>(null);
   const [settings, setSettings] = useState({
     notify_reply: true,
@@ -106,6 +113,8 @@ export default function MyPage() {
     getCustomPrompt().then(d=>{ setCustomPrompt(d.custom_sys_prompt||""); setCustomPromptMode(d.custom_prompt_mode||"append"); });
     getHeaderConfig().then(setHeaderCfg);
     listInquiries().then(list=>{ setInquiryUnread(list.filter(i=>i.unread_for_user).length); });
+    getUserAiSettings().then(d=>{ setAiDescription(d.ai_description||""); setAiStarters(d.conversation_starters||[]); setAiStartersText((d.conversation_starters||[]).join("\n")); });
+    getUserKnowledgeList().then(setKnowledgeFiles);
     getTheme().then(t=>{ setTheme(t); if(t?.favicon_url){let l=document.querySelector("link[rel~='icon']") as HTMLLinkElement;if(!l){l=document.createElement("link");l.rel="icon";document.head.appendChild(l);}l.href=t.favicon_url;} });
     // localStorageから設定を復元
     const savedTier = localStorage.getItem("ascend_ai_tier_default");
@@ -235,6 +244,7 @@ export default function MyPage() {
                 ))}
               </div>
             </div>
+            <AdBanner position="mypage" />
 
             {/* 統計グリッド */}
             <div className="grid grid-cols-2 gap-3">
@@ -684,6 +694,81 @@ export default function MyPage() {
                 {customPromptSaved ? "✅ 保存しました" : "💾 保存する"}
               </button>
             </div>
+            {/* AI設定（APEX/ULTRA限定） */}
+            {(currentPlan==="apex"||currentPlan==="ultra_member"||currentPlan==="ultra_admin") && (
+              <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",boxShadow:C.shadow}} className="p-5 space-y-3">
+                <p className="text-sm font-bold" style={{color:C.textMain}}>🤖 ユーザー専用AI設定</p>
+                <p className="text-xs" style={{color:C.textMuted}}>APEX/ULTRAプラン限定。このアカウント専用のAI設定を行います。</p>
+                <div>
+                  <p className="text-xs font-bold mb-1" style={{color:C.textSub}}>説明</p>
+                  <input value={aiDescription} onChange={e=>setAiDescription(e.target.value)}
+                    placeholder="例：このAIの用途・役割を入力してください"
+                    style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:"10px",padding:"8px 10px",fontSize:"12px",color:C.textMain,width:"100%"}}/>
+                </div>
+                <div>
+                  <p className="text-xs font-bold mb-1" style={{color:C.textSub}}>会話のきっかけ（1行1件・最大4件）</p>
+                  <textarea value={aiStartersText} onChange={e=>setAiStartersText(e.target.value)}
+                    rows={4} placeholder={"例：\n売上分析\n競合比較\n戦略立案"}
+                    style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:"10px",padding:"8px 10px",fontSize:"12px",color:C.textMain,width:"100%",resize:"vertical"}}/>
+                </div>
+                <button onClick={async()=>{
+                  const starters = aiStartersText.split("\n").map(s=>s.trim()).filter(Boolean).slice(0,4);
+                  await saveUserAiSettings(aiDescription, starters);
+                  setAiStarters(starters);
+                  setAiSettingsSaved(true);
+                  setTimeout(()=>setAiSettingsSaved(false),2000);
+                }} style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,borderRadius:"12px",boxShadow:C.shadowPrimary,width:"100%",border:"none",cursor:"pointer"}} className="text-white font-bold py-2.5 text-sm hover:opacity-90 transition-all">
+                  {aiSettingsSaved ? "✅ 保存しました" : "💾 AI設定を保存"}
+                </button>
+                <div>
+                  <p className="text-xs font-bold mb-2" style={{color:C.textSub}}>知識ファイル</p>
+                  {knowledgeFiles.length===0 && <p className="text-xs" style={{color:C.textMuted}}>知識ファイルはまだありません。</p>}
+                  {knowledgeFiles.map(kf=>(
+                    <div key={kf.source_id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.border}`}}>
+                      <span className="text-xs" style={{color:C.textMain}}>📄 {kf.title}</span>
+                      <button onClick={async()=>{
+                        await deleteUserKnowledge(kf.source_id);
+                        setKnowledgeFiles(prev=>prev.filter(f=>f.source_id!==kf.source_id));
+                      }} style={{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:"6px",color:"#ef4444",fontSize:"10px",fontWeight:600,cursor:"pointer",padding:"2px 8px"}}>
+                        🗑️
+                      </button>
+                    </div>
+                  ))}
+                  <label
+                    style={{display:"block",marginTop:"8px",background:`rgba(79,70,229,0.08)`,border:`1px dashed ${C.borderPrimary}`,borderRadius:"10px",padding:"16px",textAlign:"center",cursor:knowledgeUploading?"not-allowed":"pointer"}}
+                    onDragOver={e=>{e.preventDefault();e.stopPropagation();}}
+                    onDrop={async e=>{
+                      e.preventDefault();e.stopPropagation();
+                      if(knowledgeUploading) return;
+                      const files = Array.from(e.dataTransfer.files).slice(0, 30 - knowledgeFiles.length);
+                      if(!files.length) return;
+                      setKnowledgeUploading(true);
+                      try {
+                        for(const file of files){
+                          const res = await uploadUserKnowledge(file);
+                          if(res.ok){ const updated = await getUserKnowledgeList(); setKnowledgeFiles(updated); }
+                        }
+                      } finally { setKnowledgeUploading(false); }
+                    }}
+                  >
+                    <span className="text-xs" style={{color:C.primary,fontWeight:600,display:"block",marginBottom:"4px"}}>{knowledgeUploading ? "⏳ アップロード中..." : "📎 ファイルをアップロードする"}</span>
+                    <span className="text-xs" style={{color:C.textMuted}}>クリックまたはドラッグ＆ドロップ　{knowledgeFiles.length}/30件</span>
+                    <input type="file" accept=".txt,.md,.csv,.xlsx,.xls,.odt" style={{display:"none"}} multiple
+                      onChange={async e=>{
+                        const files = Array.from(e.target.files||[]).slice(0, 30 - knowledgeFiles.length);
+                        if(!files.length) return;
+                        setKnowledgeUploading(true);
+                        try {
+                          for(const file of files){
+                            const res = await uploadUserKnowledge(file);
+                            if(res.ok){ const updated = await getUserKnowledgeList(); setKnowledgeFiles(updated); }
+                          }
+                        } finally { setKnowledgeUploading(false); e.target.value=""; }
+                      }}/>
+                  </label>
+                </div>
+              </div>
+            )}
             {/* 全設定保存 */}
             <button onClick={()=>{
               localStorage.setItem("ascend_ai_tier_default", settings.ai_tier_default);

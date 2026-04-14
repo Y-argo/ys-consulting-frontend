@@ -47,6 +47,35 @@ export function logout(): void {
   localStorage.removeItem("ascend_tenant");
 }
 
+export async function recordAdClick(adId: string, tenantId: string): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/api/ads/click`, {
+      method: "POST",
+      headers: authHeaders() as Record<string, string>,
+      body: JSON.stringify({ ad_id: adId, tenant_id: tenantId }),
+    });
+  } catch {
+    // クリック記録失敗は無視
+  }
+}
+
+export async function fetchAd(position: "sidebar" | "mypage"): Promise<{
+  ad: {
+    id: string;
+    image_url: string;
+    link_url: string;
+    alt_text: string;
+    position: string;
+    tenant_id: string;
+  } | null;
+}> {
+  const res = await fetch(`${API_BASE}/api/ads?position=${position}`, {
+    headers: authHeaders() as Record<string, string>,
+  });
+  if (!res.ok) return { ad: null };
+  return res.json();
+}
+
 export function getStoredUser() {
   if (typeof window === "undefined") return null;
   const token = localStorage.getItem("ascend_token");
@@ -511,4 +540,47 @@ export async function getUserPlan(): Promise<string> {
     const d = await res.json();
     return d.plan || "";
   } catch { return ""; }
+}
+
+export async function getUserAiSettings(): Promise<{ai_description:string;conversation_starters:string[]}> {
+  try {
+    const res = await fetch(`${API_BASE}/api/user/user_ai_settings`, { headers: authHeaders() });
+    return await res.json();
+  } catch { return {ai_description:"", conversation_starters:[]}; }
+}
+
+export async function saveUserAiSettings(ai_description: string, conversation_starters: string[]): Promise<void> {
+  await fetch(`${API_BASE}/api/user/user_ai_settings`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ ai_description, conversation_starters }),
+  });
+}
+
+export async function getUserKnowledgeList(): Promise<{source_id:string;title:string;link_id:string}[]> {
+  try {
+    const res = await fetch(`${API_BASE}/api/user/user_knowledge_list`, { headers: authHeaders() });
+    const d = await res.json();
+    return d.files || [];
+  } catch { return []; }
+}
+
+export async function uploadUserKnowledge(file: File): Promise<{ok:boolean;chunks:number}> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const token = typeof window !== "undefined" ? localStorage.getItem("ascend_token") || "" : "";
+  const res = await fetch(`${API_BASE}/api/user/user_knowledge_upload`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: fd,
+  });
+  return res.json();
+}
+
+export async function deleteUserKnowledge(source_id: string): Promise<void> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("ascend_token") || "" : "";
+  await fetch(`${API_BASE}/api/user/user_knowledge/${encodeURIComponent(source_id)}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
 }
