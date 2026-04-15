@@ -896,12 +896,15 @@ export default function ChatPage() {
                           }
                           // フォールバック: 通常Markdown
                           const _fixMd = (s:string) => {
-                            // 壊れたMarkdown表セパレーター行を正規化
                             return s.split("\n").map((line:string) => {
-                              // |:---|や|===|や|====|などを| --- |に正規化
-                              if (/^\|(.+)\|$/.test(line.trim()) && /[=:]{2,}|-{4,}/.test(line)) {
-                                const cols = line.split("|").filter((_:string,i:number,a:string[])=>i>0&&i<a.length-1).length;
-                                return "|" + " --- |".repeat(cols);
+                              const trimmed = line.trim();
+                              if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+                                const inner = trimmed.slice(1,-1);
+                                const cells = inner.split("|").map((c:string)=>c.trim());
+                                const isSep = cells.every((c:string)=>!c||/^[-: ]+$/.test(c));
+                                if (isSep) {
+                                  return "|" + cells.map(()=>" --- ").join("|") + "|";
+                                }
                               }
                               return line;
                             }).join("\n");

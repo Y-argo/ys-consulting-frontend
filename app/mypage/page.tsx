@@ -85,9 +85,10 @@ export default function MyPage() {
   const [aiDescription, setAiDescription] = useState("");
   const [aiStarters, setAiStarters] = useState<string[]>([]);
   const [aiStartersText, setAiStartersText] = useState("");
-  const [knowledgeFiles, setKnowledgeFiles] = useState<{source_id:string;title:string;link_id:string}[]>([]);
+  const [knowledgeFiles, setKnowledgeFiles] = useState<{source_id:string;title:string;link_id:string;chunks:number;summaries:number}[]>([]);
   const [aiSettingsSaved, setAiSettingsSaved] = useState(false);
   const [knowledgeUploading, setKnowledgeUploading] = useState(false);
+  const [knowledgeProgress, setKnowledgeProgress] = useState<{current:number;total:number;name:string;log:string[]}>({current:0,total:0,name:"",log:[]});
   const [useAdminSettings, setUseAdminSettings] = useState(false);
   const [memberExtraPrompt, setMemberExtraPrompt] = useState("");
   const [theme, setTheme] = useState<ThemeConfig|null>(null);
@@ -770,6 +771,7 @@ export default function MyPage() {
                   {knowledgeFiles.length===0 && <p className="text-xs" style={{color:C.textMuted}}>知識ファイルはまだありません。</p>}
                   {knowledgeFiles.map(kf=>(
                     <div key={kf.source_id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.border}`}}>
+                      <span style={{fontSize:"10px",color:"#888",marginLeft:"4px"}}>{kf.chunks}チャンク / サマリー{kf.summaries}件</span>
                       <span className="text-xs" style={{color:C.textMain}}>📄 {kf.title}</span>
                       <button onClick={async()=>{
                         await deleteUserKnowledge(kf.source_id);
@@ -788,24 +790,43 @@ export default function MyPage() {
                       const files = Array.from(e.dataTransfer.files).slice(0, 60 - knowledgeFiles.length);
                       if(!files.length) return;
                       setKnowledgeUploading(true);
+                      setKnowledgeProgress({current:0,total:files.length,name:"",log:[]});
                       try {
-                        for(const file of files){
+                        const _log:string[]=[];
+                        for(let _i=0;_i<files.length;_i++){
+                          const file=files[_i];
+                          setKnowledgeProgress({current:_i+1,total:files.length,name:file.name,log:_log});
                           const res = await uploadUserKnowledge(file);
+                          _log.push(res.ok ? `✅ ${file.name}: ${res.chunks}チャンク / サマリー${res.summaries??0}件` : `❌ ${file.name}: 失敗`);
+                          setKnowledgeProgress({current:_i+1,total:files.length,name:file.name,log:[..._log]});
                           if(res.ok){ const updated = await getUserKnowledgeList(); setKnowledgeFiles(updated); }
                         }
                       } finally { setKnowledgeUploading(false); }
                     }}
                   >
-                    <span className="text-xs" style={{color:C.primary,fontWeight:600,display:"block",marginBottom:"4px"}}>{knowledgeUploading ? "⏳ アップロード中..." : "📎 ファイルをアップロードする"}</span>
+                    <span className="text-xs" style={{color:C.primary,fontWeight:600,display:"block",marginBottom:"4px"}}>{knowledgeUploading ? `⏳ ${knowledgeProgress.current}/${knowledgeProgress.total} 処理中: ${knowledgeProgress.name}` : "📎 ファイルをアップロードする"}</span>
                     <span className="text-xs" style={{color:C.textMuted}}>クリックまたはドラッグ＆ドロップ　{knowledgeFiles.length}/60件</span>
+                    {knowledgeProgress.log.length > 0 && (
+                      <div style={{marginTop:"8px",textAlign:"left",maxHeight:"120px",overflowY:"auto",background:"rgba(0,0,0,0.04)",borderRadius:"6px",padding:"6px 8px"}}>
+                        {knowledgeProgress.log.map((l,i)=>(
+                          <div key={i} className="text-xs" style={{color:C.textMain,lineHeight:"1.6"}}>{l}</div>
+                        ))}
+                      </div>
+                    )}
                     <input type="file" accept=".txt,.md,.csv,.xlsx,.xls,.odt" style={{display:"none"}} multiple
                       onChange={async e=>{
                         const files = Array.from(e.target.files||[]).slice(0, 60 - knowledgeFiles.length);
                         if(!files.length) return;
                         setKnowledgeUploading(true);
+                        setKnowledgeProgress({current:0,total:files.length,name:"",log:[]});
                         try {
-                          for(const file of files){
+                          const _log:string[]=[];
+                          for(let _i=0;_i<files.length;_i++){
+                            const file=files[_i];
+                            setKnowledgeProgress({current:_i+1,total:files.length,name:file.name,log:_log});
                             const res = await uploadUserKnowledge(file);
+                            _log.push(res.ok ? `✅ ${file.name}: ${res.chunks}チャンク / サマリー${res.summaries??0}件` : `❌ ${file.name}: 失敗`);
+                            setKnowledgeProgress({current:_i+1,total:files.length,name:file.name,log:[..._log]});
                             if(res.ok){ const updated = await getUserKnowledgeList(); setKnowledgeFiles(updated); }
                           }
                         } finally { setKnowledgeUploading(false); e.target.value=""; }

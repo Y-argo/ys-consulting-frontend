@@ -564,7 +564,7 @@ export async function saveUserAiSettings(ai_description: string, conversation_st
   });
 }
 
-export async function getUserKnowledgeList(): Promise<{source_id:string;title:string;link_id:string}[]> {
+export async function getUserKnowledgeList(): Promise<{source_id:string;title:string;link_id:string;chunks:number;summaries:number}[]> {
   try {
     const res = await fetch(`${API_BASE}/api/user/user_knowledge_list`, { headers: authHeaders() });
     const d = await res.json();
@@ -572,7 +572,7 @@ export async function getUserKnowledgeList(): Promise<{source_id:string;title:st
   } catch { return []; }
 }
 
-export async function uploadUserKnowledge(file: File): Promise<{ok:boolean;chunks:number}> {
+export async function uploadUserKnowledge(file: File): Promise<{ok:boolean;chunks:number;summaries:number}> {
   const fd = new FormData();
   fd.append("file", file);
   const token = typeof window !== "undefined" ? localStorage.getItem("ascend_token") || "" : "";
