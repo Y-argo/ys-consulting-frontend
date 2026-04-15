@@ -86,6 +86,8 @@ export default function ChatPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    const savedMode = localStorage.getItem("ascend_chat_mode");
+    if (savedMode === "talk" || savedMode === "consult") setChatMode(savedMode);
     setLeftOpen(window.innerWidth >= 768);
     const user = getStoredUser();
     if (!user) { router.push("/"); return; }
@@ -1173,12 +1175,12 @@ export default function ChatPage() {
               <input ref={fileRef} type="file" onChange={handleFileChange} className="hidden" accept=".txt,.md,.csv,.pdf,.xlsx,.xls,.json,.py,.js,.ts,.png,.jpg,.jpeg,.webp"/>
               <div style={{background:"rgba(0,0,0,0.02)",border:`1px solid ${C.border}`,borderRadius:"16px",display:"flex",alignItems:"flex-end",gap:"4px",padding:"6px 8px 6px 8px"}} className="flex-1 focus-within:border-indigo-400 transition-all">
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gridTemplateRows:"1fr 1fr",gap:"2px",flexShrink:0,alignSelf:"center",marginRight:"4px"}}>
-                  <button type="button" onClick={()=>setChatMode("talk")}
+                  <button type="button" onClick={()=>{setChatMode("talk");localStorage.setItem("ascend_chat_mode","talk");}}
                     style={{borderRadius:"6px",fontSize:"13px",padding:"3px 6px",transition:"all 0.2s",border:"none",cursor:"pointer",lineHeight:1,
                       background:chatMode==="talk"?"#6366f1":"rgba(0,0,0,0.04)",
                       boxShadow:chatMode==="talk"?"0 0 0 2px #6366f1":"none"}}
                     title="会話モード">💬</button>
-                  <button type="button" onClick={()=>setChatMode("consult")}
+                  <button type="button" onClick={()=>{setChatMode("consult");localStorage.setItem("ascend_chat_mode","consult");}}
                     style={{borderRadius:"6px",fontSize:"13px",padding:"3px 6px",transition:"all 0.2s",border:"none",cursor:"pointer",lineHeight:1,
                       background:chatMode==="consult"?"#4f46e5":"rgba(0,0,0,0.04)",
                       boxShadow:chatMode==="consult"?"0 0 0 2px #4f46e5":"none"}}

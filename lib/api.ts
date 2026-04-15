@@ -542,18 +542,25 @@ export async function getUserPlan(): Promise<string> {
   } catch { return ""; }
 }
 
-export async function getUserAiSettings(): Promise<{ai_description:string;conversation_starters:string[]}> {
+export async function getAdminAiSettings(): Promise<{ai_description:string;conversation_starters:string[]}> {
   try {
-    const res = await fetch(`${API_BASE}/api/user/user_ai_settings`, { headers: authHeaders() });
+    const res = await fetch(`${API_BASE}/api/user/admin_ai_settings`, { headers: authHeaders() });
     return await res.json();
   } catch { return {ai_description:"", conversation_starters:[]}; }
 }
 
-export async function saveUserAiSettings(ai_description: string, conversation_starters: string[]): Promise<void> {
+export async function getUserAiSettings(): Promise<{ai_description:string;conversation_starters:string[];use_admin_settings:boolean;member_extra_prompt:string}> {
+  try {
+    const res = await fetch(`${API_BASE}/api/user/user_ai_settings`, { headers: authHeaders() });
+    return await res.json();
+  } catch { return {ai_description:"", conversation_starters:[], use_admin_settings:false, member_extra_prompt:""}; }
+}
+
+export async function saveUserAiSettings(ai_description: string, conversation_starters: string[], use_admin_settings: boolean = false, member_extra_prompt: string = ""): Promise<void> {
   await fetch(`${API_BASE}/api/user/user_ai_settings`, {
     method: "POST",
     headers: { ...authHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify({ ai_description, conversation_starters }),
+    body: JSON.stringify({ ai_description, conversation_starters, use_admin_settings, member_extra_prompt }),
   });
 }
 

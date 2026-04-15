@@ -52,7 +52,7 @@ import {
   getStoredUser, logout, getUserStats, getFcReport, getMyFeatures,
   getRankupTips, getManual, getUserGuide, getUsageLogs,
   getCustomPrompt, saveCustomPrompt, getHeaderConfig, listInquiries, getTheme,
-  getUserPlan, getUserAiSettings, saveUserAiSettings, getUserKnowledgeList, uploadUserKnowledge, deleteUserKnowledge,
+  getUserPlan, getUserAiSettings, getAdminAiSettings, saveUserAiSettings, getUserKnowledgeList, uploadUserKnowledge, deleteUserKnowledge,
   UserStats, ThemeConfig,
 } from "@/lib/api";
 import AdBanner from "@/components/AdBanner";
@@ -88,6 +88,8 @@ export default function MyPage() {
   const [knowledgeFiles, setKnowledgeFiles] = useState<{source_id:string;title:string;link_id:string}[]>([]);
   const [aiSettingsSaved, setAiSettingsSaved] = useState(false);
   const [knowledgeUploading, setKnowledgeUploading] = useState(false);
+  const [useAdminSettings, setUseAdminSettings] = useState(false);
+  const [memberExtraPrompt, setMemberExtraPrompt] = useState("");
   const [theme, setTheme] = useState<ThemeConfig|null>(null);
   const [settings, setSettings] = useState({
     notify_reply: true,
@@ -113,7 +115,7 @@ export default function MyPage() {
     getCustomPrompt().then(d=>{ setCustomPrompt(d.custom_sys_prompt||""); setCustomPromptMode(d.custom_prompt_mode||"append"); });
     getHeaderConfig().then(setHeaderCfg);
     listInquiries().then(list=>{ setInquiryUnread(list.filter(i=>i.unread_for_user).length); });
-    getUserAiSettings().then(d=>{ setAiDescription(d.ai_description||""); setAiStarters(d.conversation_starters||[]); setAiStartersText((d.conversation_starters||[]).join("\n")); });
+    getUserAiSettings().then(d=>{ setAiDescription(d.ai_description||""); setAiStarters(d.conversation_starters||[]); setAiStartersText((d.conversation_starters||[]).join("\n")); setUseAdminSettings(!!d.use_admin_settings); setMemberExtraPrompt(d.member_extra_prompt||""); });
     getUserKnowledgeList().then(setKnowledgeFiles);
     getTheme().then(t=>{ setTheme(t); if(t?.favicon_url){let l=document.querySelector("link[rel~='icon']") as HTMLLinkElement;if(!l){l=document.createElement("link");l.rel="icon";document.head.appendChild(l);}l.href=t.favicon_url;} });
     // localStorageから設定を復元
@@ -678,6 +680,24 @@ export default function MyPage() {
             <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",boxShadow:C.shadow}} className="p-5 space-y-3">
               <p className="text-sm font-bold" style={{color:C.textMain}}>💬 カスタムプロンプト</p>
               <p className="text-xs" style={{color:C.textMuted}}>AIへの個別指示を追加できます。</p>
+              {currentPlan==="ultra_member" && (
+                <div style={{display:"flex",alignItems:"center",gap:"8px",padding:"8px 10px",background:"rgba(79,70,229,0.06)",borderRadius:"10px",border:"1px solid rgba(79,70,229,0.15)"}}>
+                  <input type="checkbox" id="useAdminCustomPrompt" checked={useAdminSettings}
+                    onChange={async e=>{
+                      const checked = e.target.checked;
+                      setUseAdminSettings(checked);
+                      if(checked){
+                        const adminSettings = await getAdminAiSettings();
+                        setAiDescription(adminSettings.ai_description||"");
+                        setAiStartersText((adminSettings.conversation_starters||[]).join("\n"));
+                      }
+                    }}
+                    style={{width:"16px",height:"16px",cursor:"pointer",accentColor:"#4f46e5"}}/>
+                  <label htmlFor="useAdminCustomPrompt" className="text-xs" style={{color:"#4f46e5",fontWeight:600,cursor:"pointer"}}>
+                    管理者のカスタムプロンプトを使用する
+                  </label>
+                </div>
+              )}
               <select value={customPromptMode} onChange={e=>setCustomPromptMode(e.target.value)}
                 style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:"10px",padding:"6px 10px",fontSize:"12px",color:C.textMain,width:"100%"}}>
                 <option value="append">追記（システムプロンプトに追加）</option>
@@ -699,6 +719,23 @@ export default function MyPage() {
               <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",boxShadow:C.shadow}} className="p-5 space-y-3">
                 <p className="text-sm font-bold" style={{color:C.textMain}}>🤖 ユーザー専用AI設定</p>
                 <p className="text-xs" style={{color:C.textMuted}}>APEX/ULTRAプラン限定。このアカウント専用のAI設定を行います。</p>
+                {currentPlan==="ultra_member" && (
+                  <div style={{display:"flex",alignItems:"center",gap:"8px",padding:"8px 10px",background:"rgba(79,70,229,0.06)",borderRadius:"10px",border:"1px solid rgba(79,70,229,0.15)"}}>
+                    <input type="checkbox" id="useAdminSettings" checked={useAdminSettings} onChange={async e=>{
+                      const checked = e.target.checked;
+                      setUseAdminSettings(checked);
+                      if(checked){
+                        const adminSettings = await getAdminAiSettings();
+                        setAiDescription(adminSettings.ai_description||"");
+                        setAiStartersText((adminSettings.conversation_starters||[]).join("\n"));
+                      }
+                    }}
+                      style={{width:"16px",height:"16px",cursor:"pointer",accentColor:"#4f46e5"}}/>
+                    <label htmlFor="useAdminSettings" className="text-xs" style={{color:"#4f46e5",fontWeight:600,cursor:"pointer"}}>
+                      管理者のAI設定を使用する
+                    </label>
+                  </div>
+                )}
                 <div>
                   <p className="text-xs font-bold mb-1" style={{color:C.textSub}}>説明</p>
                   <input value={aiDescription} onChange={e=>setAiDescription(e.target.value)}
@@ -711,9 +748,17 @@ export default function MyPage() {
                     rows={4} placeholder={"例：\n売上分析\n競合比較\n戦略立案"}
                     style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:"10px",padding:"8px 10px",fontSize:"12px",color:C.textMain,width:"100%",resize:"vertical"}}/>
                 </div>
+                {useAdminSettings && currentPlan==="ultra_member" && (
+                  <div>
+                    <p className="text-xs font-bold mb-1" style={{color:C.textSub}}>追加指示（管理者設定に追記）</p>
+                    <textarea value={memberExtraPrompt} onChange={e=>setMemberExtraPrompt(e.target.value)}
+                      rows={3} placeholder={"例：\n敬語で話してください\n返答は短くまとめてください"}
+                      style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:"10px",padding:"8px 10px",fontSize:"12px",color:C.textMain,width:"100%",resize:"vertical"}}/>
+                  </div>
+                )}
                 <button onClick={async()=>{
                   const starters = aiStartersText.split("\n").map(s=>s.trim()).filter(Boolean).slice(0,4);
-                  await saveUserAiSettings(aiDescription, starters);
+                  await saveUserAiSettings(aiDescription, starters, useAdminSettings, memberExtraPrompt);
                   setAiStarters(starters);
                   setAiSettingsSaved(true);
                   setTimeout(()=>setAiSettingsSaved(false),2000);
@@ -740,7 +785,7 @@ export default function MyPage() {
                     onDrop={async e=>{
                       e.preventDefault();e.stopPropagation();
                       if(knowledgeUploading) return;
-                      const files = Array.from(e.dataTransfer.files).slice(0, 30 - knowledgeFiles.length);
+                      const files = Array.from(e.dataTransfer.files).slice(0, 60 - knowledgeFiles.length);
                       if(!files.length) return;
                       setKnowledgeUploading(true);
                       try {
@@ -752,10 +797,10 @@ export default function MyPage() {
                     }}
                   >
                     <span className="text-xs" style={{color:C.primary,fontWeight:600,display:"block",marginBottom:"4px"}}>{knowledgeUploading ? "⏳ アップロード中..." : "📎 ファイルをアップロードする"}</span>
-                    <span className="text-xs" style={{color:C.textMuted}}>クリックまたはドラッグ＆ドロップ　{knowledgeFiles.length}/30件</span>
+                    <span className="text-xs" style={{color:C.textMuted}}>クリックまたはドラッグ＆ドロップ　{knowledgeFiles.length}/60件</span>
                     <input type="file" accept=".txt,.md,.csv,.xlsx,.xls,.odt" style={{display:"none"}} multiple
                       onChange={async e=>{
-                        const files = Array.from(e.target.files||[]).slice(0, 30 - knowledgeFiles.length);
+                        const files = Array.from(e.target.files||[]).slice(0, 60 - knowledgeFiles.length);
                         if(!files.length) return;
                         setKnowledgeUploading(true);
                         try {
