@@ -92,6 +92,7 @@ export interface Message {
   role: "user" | "assistant";
   content: string;
   cases?: string[];
+  confirmation_choices?: string[];
   structured?: {
     summary: string;
     cards: { current: string[]; risk: string[]; plan: string[] };
@@ -99,6 +100,7 @@ export interface Message {
     actions: string[];
     value_message: string;
   };
+  sources?: Array<{text:string; score:number; source_id:string; is_retrieved:boolean}>;
 }
 
 export interface SendResult {
@@ -106,6 +108,7 @@ export interface SendResult {
   chat_id: string;
   msg_id: string;
   cases?: string[];
+  confirmation_choices?: string[];
   images?: {mime_type:string; data:string}[];
   structured?: {
     summary: string;
@@ -114,6 +117,7 @@ export interface SendResult {
     actions: string[];
     value_message: string;
   };
+  sources?: Array<{text:string; score:number; source_id:string; is_retrieved:boolean}>;
 }
 
 export async function sendMessage(
@@ -234,15 +238,17 @@ export async function getUsageLogs(): Promise<{prompt: string; timestamp: string
 }
 
 export async function deleteSession(chat_id: string): Promise<void> {
-  await fetch(`${API_BASE}/api/user/session/${chat_id}`, { method: "DELETE", headers: authHeaders() });
+  const res = await fetch(`${API_BASE}/api/user/session/${chat_id}`, { method: "DELETE", headers: authHeaders() });
+  if (!res.ok) throw new Error(`削除失敗: ${res.status}`);
 }
 
 export async function renameSession(chat_id: string, title: string): Promise<void> {
-  await fetch(`${API_BASE}/api/user/session/${chat_id}/rename`, {
+  const res = await fetch(`${API_BASE}/api/user/session/${chat_id}/rename`, {
     method: "PATCH",
     headers: authHeaders(),
     body: JSON.stringify({ title }),
   });
+  if (!res.ok) throw new Error(`リネーム失敗: ${res.status}`);
 }
 
 export async function getHeaderConfig(): Promise<Record<string, string>> {
@@ -590,4 +596,96 @@ export async function deleteUserKnowledge(source_id: string): Promise<void> {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
   });
+}
+
+// ============================================================
+// SSE Streaming Clients
+// ============================================================
+type SSECallback = (step: string) => void;
+type SSEResult = { reply: string; chat_id: string; msg_id: string; cases: string[]; images: { mime_type: string; data: string; gcs_url?: string }[]; structured: { summary: string; cards: { current: string[]; risk: string[]; plan: string[] }; analysis: { type: string; urgency: string; importance: string; mode: string }; actions: string[]; value_message: string } | undefined; sources?: Array<{text:string; score:number; source_id:string; is_retrieved:boolean}>; confirmation_choices?: string[]; intent_label?: string };
+
+async function _ssePost(url: string, body: object, onStep: SSECallback): Promise<SSEResult> {
+  const token = localStorage.getItem("ascend_token") || "";
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok || !res.body) throw new Error(`SSE接続失敗: ${res.status}`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  // 行バッファ: チャンク境界をまたぐ不完全行を保持
+  let lineBuf = "";
+  // データバッファ: 複数行にまたがるSSEイベントのdata行を結合
+  let dataBuf = "";
+  let result: SSEResult | null = null;
+  let _sseErr: string | null = null;
+  while (true) {
+    const { done, value } = await reader.read();
+    // done=trueでもvalueにデータが含まれる場合があるため必ずデコード
+    const chunk = value ? decoder.decode(value, { stream: !done }) : "";
+    lineBuf += chunk;
+    // 行単位に分割して処理
+    const rawLines = lineBuf.split("\n");
+    // 最後の要素は不完全行としてlineBufに残す（done時は""）
+    lineBuf = done ? "" : (rawLines.pop() || "");
+    for (const raw of rawLines) {
+      const line = raw.trimEnd();
+      if (line === "") {
+        // 空行 = SSEイベントの区切り → dataBufをパース
+        if (dataBuf) {
+          try {
+            const evt = JSON.parse(dataBuf);
+            if (evt.type === "step") onStep(evt.label);
+            else if (evt.type === "done") result = evt as SSEResult;
+            else if (evt.type === "error") _sseErr = evt.message || "エラー";
+          } catch {}
+          dataBuf = "";
+        }
+      } else if (line.startsWith("data: ")) {
+        // data行: 既存dataBufに追記（複数data行対応）
+        const payload = line.slice(6);
+        dataBuf = dataBuf ? dataBuf + payload : payload;
+      }
+      // コメント行（:）やその他フィールドは無視
+    }
+    if (done) break;
+  }
+  if (_sseErr) throw new Error("⚠️ " + _sseErr);
+  if (!result) throw new Error("SSE応答なし");
+  return result;
+}
+
+export async function sendMessageStream(message: string, chatId: string, aiTier: string, purposeMode: string, chatMode: string, onStep: SSECallback): Promise<SSEResult> {
+  return _ssePost(`${API_BASE}/api/chat/send_stream`, { message, chat_id: chatId, ai_tier: aiTier, purpose_mode: purposeMode, chat_mode: chatMode }, onStep);
+}
+
+export async function sendImageMessageStream(message: string, chatId: string, aiTier: string, imageb64?: string, imageMime?: string, onStep: SSECallback = ()=>{}): Promise<SSEResult> {
+  return _ssePost(`${API_BASE}/api/chat/send_image_stream`, { message, chat_id: chatId, ai_tier: aiTier, image_b64: imageb64, image_mime: imageMime }, onStep);
+}
+
+export async function sendFileMessageStream(message: string, chatId: string, aiTier: string, fileText: string, filename: string, onStep: SSECallback = ()=>{}): Promise<SSEResult> {
+  return _ssePost(`${API_BASE}/api/chat/send_file_stream`, { message, chat_id: chatId, ai_tier: aiTier, file_text: fileText, filename }, onStep);
+}
+
+export async function getRagSettings(): Promise<{threshold:number;top_k:number}> {
+  const res = await fetch(`${API_BASE}/api/user/rag_settings`, { headers: authHeaders() });
+  if (!res.ok) return { threshold: 0.42, top_k: 5 };
+  return res.json();
+}
+
+export async function saveRagSettings(threshold: number, top_k: number): Promise<void> {
+  await fetch(`${API_BASE}/api/user/rag_settings`, {
+    method: "POST", headers: authHeaders() as Record<string, string>,
+    body: JSON.stringify({ threshold, top_k }),
+  });
+}
+
+export async function getRecentSourceHistory(): Promise<Array<{is_retrieved:boolean; score:number; text:string; source_id:string}>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/chat/sources_log`, { headers: authHeaders() });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.sources || [];
+  } catch { return []; }
 }

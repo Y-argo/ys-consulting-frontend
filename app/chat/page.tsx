@@ -27,6 +27,9 @@ interface MsgExt extends Message {
   tableResult?: TableResult;
   usedMode?: string;
   structured?: { summary: string; cards: { current: string[]; risk: string[]; plan: string[] }; analysis: { type: string; urgency: string; importance: string; mode: string }; actions: string[]; value_message: string; };
+  sources?: Array<{text:string; score:number; source_id:string; is_retrieved:boolean}>;
+  isVerified?: boolean;
+  confirmation_choices?: string[];
 }
 
 const C = {
@@ -51,6 +54,10 @@ export default function ChatPage() {
   const [uid, setUid] = useState("");
   const [messages, setMessages] = useState<MsgExt[]>([]);
   const [input, setInput] = useState("");
+  const setInputAndSave = (val: string) => {
+    setInput(val);
+    if (typeof window !== "undefined") localStorage.setItem("ascend_input_draft", val);
+  };
   const [loading, setLoading] = useState(false);
   const [chatId, setChatId] = useState("main");
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -67,6 +74,7 @@ export default function ChatPage() {
   const [modal, setModal] = useState<Modal>("none");
   const [modalContent, setModalContent] = useState("");
   const [renameVal, setRenameVal] = useState("");
+  const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [fcData, setFcData] = useState<{report:Record<string,unknown>|null;use_count_since_report:number}>({report:null,use_count_since_report:0});
   const [headerCfg, setHeaderCfg] = useState<Record<string,string>>({});
   const [leftOpen, setLeftOpen] = useState(false);
@@ -75,15 +83,27 @@ export default function ChatPage() {
   const [scoreDelta, setScoreDelta] = useState<number|null>(null);
   const [editVal, setEditVal] = useState("");
   const [attachment, setAttachment] = useState<AttachmentResult|null>(null);
+  const [intentLabel, setIntentLabel] = useState<string|null>(null);
   const [attachLoading, setAttachLoading] = useState(false);
   const [feedbackToast, setFeedbackToast] = useState<string>("");
   const [loadingStep, setLoadingStep] = useState(0);
+  const [loadingLabel, setLoadingLabel] = useState("");
   const [showInputExample, setShowInputExample] = useState(false);
   const [chatExamples, setChatExamples] = useState<string[]>([]);
   const [purposeModesData, setPurposeModesData] = useState<{id:string;label:string}[]>([]);
   const [currentCsv, setCurrentCsv] = useState<string>("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const _draftRestoredRef = useRef(false);
+
+
+  useEffect(() => {
+    if (!_draftRestoredRef.current) {
+      _draftRestoredRef.current = true;
+      const _d = localStorage.getItem("ascend_input_draft");
+      if (_d) setInput(_d);
+    }
+  }, []);
 
   useEffect(() => {
     const savedMode = localStorage.getItem("ascend_chat_mode");
@@ -93,11 +113,14 @@ export default function ChatPage() {
     if (!user) { router.push("/"); return; }
     setUid(user.uid);
     listSessions().then(s => {
-      if (s.length > 0) {
-        setSessions(s);
-        fetchHistory(s[0].chat_id);
+      const merged = [...s];
+      if (merged.length > 0) {
+        setSessions(merged);
+        setChatId(merged[0].chat_id);
+        fetchHistory(merged[0].chat_id);
       } else {
         newSession().then(id => {
+          localStorage.setItem("ascend_created_chats", JSON.stringify([id]));
           setSessions([{chat_id:id, title:"新しいチャット"}]);
           setChatId(id);
         });
@@ -160,13 +183,21 @@ export default function ChatPage() {
   useEffect(() => { scrollToBottom(false); }, []);
   useEffect(() => { scrollToBottom(true); }, [messages]);
 
-  async function fetchSessions() {
+  async function fetchSessions(preserveChatId?: string) {
     const s = await listSessions();
-    setSessions(s.length > 0 ? s : [{chat_id:"main", title:"メインチャット"}]);
+    if (s.length > 0) {
+      setSessions(s);
+      // 現在のchatIdがリストにない場合（新規作成直後のリロード等）は先頭に追加
+      if (preserveChatId && !s.find(x => x.chat_id === preserveChatId)) {
+        setSessions(prev => [{chat_id: preserveChatId, title: "新しいチャット"}, ...s]);
+      }
+    } else {
+      setSessions([{chat_id:"main", title:"メインチャット"}]);
+    }
   }
   async function fetchHistory(cid: string) {
     const h = await loadHistory(cid);
-    setMessages(h.map((m,i)=>({...m, id:`hist_${i}_${Date.now()}`, suggestions: m.cases||[], structured: m.structured||undefined})));
+    setMessages(h.map((m,i)=>({...m, id:`hist_${i}_${Date.now()}`, suggestions: Array.isArray(m.cases)?m.cases:[], structured: m.structured&&typeof m.structured==="object"?m.structured:undefined})));
     setTimeout(()=>scrollToBottom(false), 100);
     setChatId(cid);
   }
@@ -182,6 +213,7 @@ export default function ChatPage() {
     const text = (overrideText ?? input).trim();
     if (!text || loading) return;
     setInput("");
+    if(typeof window!=="undefined")localStorage.removeItem("ascend_input_draft");
     setShowInputExample(false);
     if (text.startsWith("/") && ["/rank","/filter","/derive","/top","/consult","/sort","/reset"].some(c=>text.startsWith(c))) {
       await handleTableCommand(text); return;
@@ -196,19 +228,19 @@ export default function ChatPage() {
     setMessages(p=>[...p, userMsg]);
     setLoading(true);
     setLoadingStep(0);
-    const _stepTimer = setInterval(()=>setLoadingStep(s=>Math.min(s+1,5)),1200);
+    const _stepTimer = setInterval(()=>{setLoadingStep(s=>Math.min(s+1,5));setLoadingLabel("");},600);
     try {
       const sendText = text;
       const _isImgAttach = !!attachment && /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(attachment.filename||"");
       const _isFileReq2 = !!attachment && !_isImgAttach;
-      const _isImageReq2 = _isImgAttach || (/画像|イメージ|イラスト|ロゴ|アイコン|バナー|生成して|描いて|作って/i.test(sendText) && !/解析|分析|読んで/.test(sendText));
+      const _isImageReq2 = _isImgAttach || (/画像|イメージ|イラスト|ロゴ|アイコン|バナー|描いて|作って/i.test(sendText) && !/解析|分析|読んで|リスト|一覧|手順|やること/.test(sendText));
       const _isInvestReq2 = /投資|銘柄|株|相場|シグナル|GOAL_BOTTOM|WATCH|底打ち|反発|買い|売り/i.test(sendText);
       let res;
+      const _onStep = (label: string) => { clearInterval(_stepTimer); const _sm: Record<string,number> = {"入力を解析中...":0,"意図を特定中...":1,"ナレッジを検索中...":2,"専用ナレッジを検索中...":2,"回答を構築中...":3,"構造を解析中...":4,"回答を整形中...":5,"最終調整中...":5,"ファイルを受信中...":0,"内容を解析中...":1,"構造を把握中...":2,"インサイトを生成中...":3,"画像を受信中...":0,"画像を解析中...":1,"内容を把握中...":2,"インサイトを抽出中...":3,"プロンプトを設計中...":1,"画像を生成中...":2,"品質を検証中...":3,"出力を最適化中...":4,"仕上げ中...":5}; const _si = _sm[label]; if (_si !== undefined) setLoadingStep(_si); setLoadingLabel(label); };
       if (_isFileReq2 && attachment) {
-        const { sendFileMessage } = await import("@/lib/api");
-        res = await sendFileMessage(sendText, chatId, aiTier, attachment.extracted_text||"", attachment.filename||"");
+        const { sendFileMessageStream } = await import("@/lib/api");
+        res = await sendFileMessageStream(sendText, chatId, aiTier, attachment.extracted_text||"", attachment.filename||"", _onStep);
       } else if (_isImageReq2) {
-        // 画像添付の場合はb64を抽出して送信
         let _imgB64: string|undefined = undefined;
         let _imgMime: string|undefined = undefined;
         if (_isImgAttach && attachment?.extracted_text?.startsWith("__IMAGE_B64__:")) {
@@ -216,23 +248,28 @@ export default function ChatPage() {
           _imgMime = _parts[1];
           _imgB64 = _parts.slice(2).join(":");
         }
-        const { sendImageMessage } = await import("@/lib/api");
-        res = await sendImageMessage(sendText, chatId, aiTier, _imgB64, _imgMime);
+        const { sendImageMessageStream } = await import("@/lib/api");
+        res = await sendImageMessageStream(sendText, chatId, aiTier, _imgB64, _imgMime, _onStep);
       } else if (_isInvestReq2 && purposeMode !== "FINANCE") {
         const { sendInvestMessage } = await import("@/lib/api");
         res = await sendInvestMessage(sendText, chatId, aiTier);
       } else {
-        res = await sendMessage(sendText, chatId, aiTier, purposeMode, chatMode);
+        const { sendMessageStream } = await import("@/lib/api");
+        res = await sendMessageStream(sendText, chatId, aiTier, purposeMode, chatMode, _onStep);
       }
-      const cases = res.cases||[];
-      const images = res.images||[];
-      setMessages(p=>[...p, {id:`a_${Date.now()}`, role:"assistant", content:res.reply, feedback:null, suggestions:cases, images, structured:res.structured||undefined}]);
+      const cases = Array.isArray(res.cases) ? res.cases : [];
+      const images = Array.isArray(res.images) ? res.images : [];
+      const _st = res.structured && typeof res.structured === "object" ? res.structured : undefined;
+      const _sources = Array.isArray(res.sources) ? res.sources : [];
+      const _isVerif = _sources.length === 0 || _sources.some((sc:any)=>sc.is_retrieved);
+      if ((res as any).intent_label) setIntentLabel((res as any).intent_label);
+      setMessages(p=>[...p, {id:`a_${Date.now()}`, role:"assistant", content:res.reply, feedback:null, suggestions:cases, confirmation_choices:(res.confirmation_choices||[]), images, structured:_st, sources:_sources, isVerified:_isVerif, intent_label:(res as any).intent_label||null}]);
       getUserStats().then(s=>{ setStats(s); if(s?.level_last_delta && s.level_last_delta!==0){ setScoreDelta(s.level_last_delta); setTimeout(()=>setScoreDelta(null),2500); } });
       getFcReport().then(setFcData);
     } catch(err:unknown) {
       const msg = err instanceof Error ? err.message : "エラー";
       setMessages(p=>[...p, {id:`e_${Date.now()}`, role:"assistant", content:"⚠️ "+msg}]);
-    } finally { clearInterval(_stepTimer); setLoading(false); }
+    } finally { clearInterval(_stepTimer); setLoading(false); setLoadingLabel(""); }
   }
 
   async function handleTableCommand(cmd: string) {
@@ -259,6 +296,7 @@ export default function ChatPage() {
     const text = val.trim();
     if (!text || loading) return;
     setInput("");
+    if(typeof window!=="undefined")localStorage.removeItem("ascend_input_draft");
     const userMsg: MsgExt = {
       id:`u_${Date.now()}`, role:"user",
       content: text,
@@ -267,24 +305,30 @@ export default function ChatPage() {
     setMessages(p=>[...p, userMsg]);
     setLoading(true);
     setLoadingStep(0);
-    const _stepTimer = setInterval(()=>setLoadingStep(s=>Math.min(s+1,5)),1200);
+    const _stepTimer = setInterval(()=>{setLoadingStep(s=>Math.min(s+1,5));setLoadingLabel("");},600);
     try {
-      const _isImageReq2 = /画像|イメージ|イラスト|ロゴ|アイコン|バナー|生成して|描いて|作って/i.test(text) && !/解析|分析|読んで/.test(text);
+      const _isImageReq2 = /画像|イメージ|イラスト|ロゴ|アイコン|バナー|描いて|作って/i.test(text) && !/解析|分析|読んで|リスト|一覧|手順|やること/.test(text);
       const _isInvestReq2 = /投資|銘柄|株|相場|シグナル|GOAL_BOTTOM|WATCH|底打ち|反発|買い|売り/i.test(text);
       let res;
+      const _onStep2 = (label: string) => { clearInterval(_stepTimer); const _sm: Record<string,number> = {"入力を解析中...":0,"意図を特定中...":1,"ナレッジを検索中...":2,"専用ナレッジを検索中...":2,"回答を構築中...":3,"構造を解析中...":4,"回答を整形中...":5,"最終調整中...":5}; const _si = _sm[label]; if (_si !== undefined) setLoadingStep(_si); setLoadingLabel(label); };
       if (_isImageReq2) {
-        const { sendImageMessage } = await import("@/lib/api");
-        res = await sendImageMessage(text, chatId, aiTier);
+        const { sendImageMessageStream } = await import("@/lib/api");
+        res = await sendImageMessageStream(text, chatId, aiTier, undefined, undefined, _onStep2);
       } else if (_isInvestReq2 && purposeMode !== "FINANCE") {
         const { sendInvestMessage } = await import("@/lib/api");
         res = await sendInvestMessage(text, chatId, aiTier);
       } else {
-        res = await sendMessage(text, chatId, aiTier, purposeMode, chatMode);
+        const { sendMessageStream } = await import("@/lib/api");
+        res = await sendMessageStream(text, chatId, aiTier, purposeMode, chatMode, _onStep2);
       }
       clearInterval(_stepTimer);
-      const cases = res.cases||[];
-      const images = res.images||[];
-      setMessages(p=>[...p, {id:`a_${Date.now()}`, role:"assistant", content:res.reply, feedback:null, suggestions:cases, images, structured:res.structured||undefined}]);
+      const cases = Array.isArray(res.cases) ? res.cases : [];
+      const images = Array.isArray(res.images) ? res.images : [];
+      const _st2 = res.structured && typeof res.structured === "object" ? res.structured : undefined;
+      const _sources2 = Array.isArray(res.sources) ? res.sources : [];
+      const _isVerif2 = _sources2.length === 0 || _sources2.some((sc:any)=>sc.is_retrieved);
+      if ((res as any).intent_label) setIntentLabel((res as any).intent_label);
+      setMessages(p=>[...p, {id:`a_${Date.now()}`, role:"assistant", content:res.reply, feedback:null, suggestions:cases, confirmation_choices:(res.confirmation_choices||[]), images, structured:_st2, sources:_sources2, isVerified:_isVerif2, intent_label:(res as any).intent_label||null}]);
       getUserStats().then(s=>{ setStats(s); if(s?.level_last_delta && s.level_last_delta!==0){ setScoreDelta(s.level_last_delta); setTimeout(()=>setScoreDelta(null),2500); } });
       getFcReport().then(setFcData);
     } catch(err:unknown) {
@@ -312,26 +356,36 @@ export default function ChatPage() {
   }
 
   async function handleNewSession() {
-    const cid = await newSession();
-    setSessions(s => [...s, {chat_id: cid, title: "新しいチャット"}]);
-    setMessages([]);
-    setChatId(cid);
-    await new Promise(r => setTimeout(r, 800));
-    await fetchSessions();
+    if (isCreatingSession) return;
+    setIsCreatingSession(true);
+    try {
+      const cid = await newSession();
+      const _existing = JSON.parse(localStorage.getItem("ascend_created_chats") || "[]");
+      localStorage.setItem("ascend_created_chats", JSON.stringify([..._existing, cid]));
+      setMessages([]);
+      setChatId(cid);
+      setSessions(prev => [{chat_id: cid, title: "新しいチャット"}, ...prev]);
+    } catch(e) {
+      alert("チャット作成失敗: " + String(e));
+    } finally {
+      setIsCreatingSession(false);
+    }
   }
   async function handleDelete() {
     if (!confirm("このチャットを削除しますか？")) return;
     const deletedId = chatId;
     setMessages([]);
-    await deleteSession(deletedId);
-    await new Promise(r => setTimeout(r, 800));
+    try { await deleteSession(deletedId); } catch(e) { alert("削除に失敗しました: " + String(e)); return; }
+    const _cc: string[] = JSON.parse(localStorage.getItem("ascend_created_chats") || "[]");
+    localStorage.setItem("ascend_created_chats", JSON.stringify(_cc.filter(id => id !== deletedId)));
+    await new Promise(r => setTimeout(r, 1200));
     const s = await listSessions();
     const next = s.filter(x => x.chat_id !== deletedId);
     if (next.length > 0) {
       setSessions(next);
       setChatId(next[0].chat_id);
       const h = await loadHistory(next[0].chat_id);
-      setMessages(h.map((m,i)=>({...m, id:`hist_${i}_${Date.now()}`, suggestions: m.cases||[], structured: m.structured||undefined})));
+      setMessages(h.map((m,i)=>({...m, id:`hist_${i}_${Date.now()}`, suggestions: Array.isArray(m.cases)?m.cases:[], structured: m.structured&&typeof m.structured==="object"?m.structured:undefined})));
     } else {
       const newId = await newSession();
       setSessions([{chat_id:newId, title:"新しいチャット"}]);
@@ -341,7 +395,10 @@ export default function ChatPage() {
   }
   async function handleRename() {
     if (!renameVal.trim()) return;
-    await renameSession(chatId, renameVal.trim()); setModal("none"); setRenameVal(""); await fetchSessions();
+    try { await renameSession(chatId, renameVal.trim()); } catch(e) { alert("名前変更に失敗しました: " + String(e)); return; }
+    setModal("none"); setRenameVal("");
+    await new Promise(r => setTimeout(r, 800));
+    await fetchSessions();
   }
   async function openModal(m: Modal) {
     setModal(m);
@@ -460,22 +517,6 @@ export default function ChatPage() {
                   </div>
                 );
               })()}
-              <button onClick={handleNewSession} style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`, boxShadow:C.shadowPrimary}} className="w-full text-xs font-bold text-white rounded-xl py-2.5 hover:opacity-90 transition-all">
-                ＋ 新しいチャット
-              </button>
-            </div>
-
-            <div className="px-2 pb-2 space-y-0.5">
-              {sessions.map(s=>(
-                <button key={s.chat_id} onClick={()=>fetchHistory(s.chat_id)}
-                  style={chatId===s.chat_id
-                    ?{background:"rgba(79,70,229,0.1)",border:`1px solid ${C.borderPrimary}`,color:C.primary,borderRadius:"10px"}
-                    :{border:"1px solid transparent",color:C.textSub,borderRadius:"10px"}
-                  }
-                  className="w-full text-left text-xs px-3 py-2 truncate transition-all hover:bg-black/4 hover:text-gray-700">
-                  💬 {s.title||s.chat_id}
-                </button>
-              ))}
             </div>
             {dm && (() => {
               const rank = String(dm.diagnosis_rank||"C");
@@ -528,6 +569,23 @@ export default function ChatPage() {
                 </div>
               );
             })()}
+            <div className="px-2 pb-2">
+              <button onClick={handleNewSession} disabled={isCreatingSession} style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`, boxShadow:C.shadowPrimary, opacity: isCreatingSession ? 0.6 : 1}} className="w-full text-xs font-bold text-white rounded-xl py-2.5 hover:opacity-90 transition-all disabled:cursor-not-allowed">
+                {isCreatingSession ? "作成中..." : "＋ 新しいチャット"}
+              </button>
+            </div>
+            <div className="px-2 pb-2 space-y-0.5">
+              {sessions.map(s=>(
+                <button key={s.chat_id} onClick={()=>fetchHistory(s.chat_id)}
+                  style={chatId===s.chat_id
+                    ?{background:"rgba(79,70,229,0.1)",border:`1px solid ${C.borderPrimary}`,color:C.primary,borderRadius:"10px"}
+                    :{border:"1px solid transparent",color:C.textSub,borderRadius:"10px"}
+                  }
+                  className="w-full text-left text-xs px-3 py-2 truncate transition-all hover:bg-black/4 hover:text-gray-700">
+                  💬 {s.title||s.chat_id}
+                </button>
+              ))}
+            </div>
 
             <div className="p-2 space-y-0.5" style={{borderTop:`1px solid ${C.border}`}}>
               {[
@@ -626,7 +684,7 @@ export default function ChatPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-2 max-w-lg w-full">
                   {["売上を上げる戦略を教えて","リスクを最小化する方法は？","競合分析をしてほしい","意思決定の優先順位を整理したい"].map(q=>(
-                    <button key={q} onClick={()=>setInput(q)}
+                    <button key={q} onClick={()=>setInputAndSave(q)}
                       style={{background:C.card, border:`1px solid ${C.border}`, boxShadow:C.shadow, borderRadius:"12px"}}
                       className="text-xs text-left p-3 hover:border-indigo-300 hover:shadow-md transition-all">
                       {q} →
@@ -700,20 +758,20 @@ export default function ChatPage() {
                                     <p className="text-xs font-bold mb-1" style={{color:C.primary}}>📊 総合評価</p>
                                     <p className="text-sm" style={{color:C.textMain}}>{_j.summary}</p>
                                   </div>
-                                  {(_j.structure_layers||[]).map((l:Record<string,unknown>,i:number)=>(
+                                  {(Array.isArray(_j.structure_layers)?_j.structure_layers:[]).map((l:Record<string,unknown>,i:number)=>(
                                     <div key={i} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"10px",padding:"8px 12px",display:"flex",gap:"10px",alignItems:"flex-start"}}>
                                       <span style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,color:"white",borderRadius:"6px",padding:"2px 8px",fontSize:"10px",fontWeight:700,flexShrink:0}}>{String(l.layer||"")}</span>
                                       <div><p className="text-xs" style={{color:C.textMain}}>{String(l.content||"")}</p></div>
                                     </div>
                                   ))}
                                   {_j.key_bottleneck && <div style={{background:"rgba(239,68,68,0.06)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:"10px",padding:"8px 12px"}}><p className="text-xs font-bold" style={{color:"#dc2626"}}>🎯 主要ボトルネック: {String(_j.key_bottleneck)}</p></div>}
-                                  {(_j.next_actions||[]).length>0 && <div style={{background:"rgba(16,185,129,0.06)",border:"1px solid rgba(16,185,129,0.2)",borderRadius:"10px",padding:"8px 12px"}}><p className="text-xs font-bold mb-1" style={{color:"#059669"}}>✅ 推奨アクション</p>{(_j.next_actions||[]).map((a:string,i:number)=><p key={i} className="text-xs" style={{color:C.textMain}}>• {a}</p>)}</div>}
+                                  {(Array.isArray(_j.next_actions)?_j.next_actions:[]).length>0 && <div style={{background:"rgba(16,185,129,0.06)",border:"1px solid rgba(16,185,129,0.2)",borderRadius:"10px",padding:"8px 12px"}}><p className="text-xs font-bold mb-1" style={{color:"#059669"}}>✅ 推奨アクション</p>{(Array.isArray(_j.next_actions)?_j.next_actions:[]).map((a:string,i:number)=><p key={i} className="text-xs" style={{color:C.textMain}}>• {a}</p>)}</div>}
                                 </div>
                               );
                               // issue診断
                               if (_j.hypotheses && _j.root_cause) return (
                                 <div className="space-y-2">
-                                  {(_j.hypotheses||[]).map((h:Record<string,unknown>,i:number)=>(
+                                  {(Array.isArray(_j.hypotheses)?_j.hypotheses:[]).map((h:Record<string,unknown>,i:number)=>(
                                     <div key={i} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"10px",padding:"10px 14px"}}>
                                       <div className="flex gap-2 items-center mb-1">
                                         <span style={{background:h.priority==="high"?"rgba(239,68,68,0.1)":h.priority==="mid"?"rgba(245,158,11,0.1)":"rgba(16,185,129,0.1)",color:h.priority==="high"?"#dc2626":h.priority==="mid"?"#d97706":"#059669",borderRadius:"6px",padding:"1px 8px",fontSize:"10px",fontWeight:700}}>{String(h.priority||"").toUpperCase()}</span>
@@ -728,13 +786,13 @@ export default function ChatPage() {
                               // execution計画
                               if (_j.phases && _j.critical_path) return (
                                 <div className="space-y-2">
-                                  {(_j.phases||[]).map((p:Record<string,unknown>,i:number)=>(
+                                  {(Array.isArray(_j.phases)?_j.phases:[]).map((p:Record<string,unknown>,i:number)=>(
                                     <div key={i} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"10px",padding:"10px 14px"}}>
                                       <div className="flex gap-2 items-center mb-1">
                                         <span style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,color:"white",borderRadius:"6px",padding:"2px 8px",fontSize:"10px",fontWeight:700}}>{String(p.phase||"")}</span>
                                         <span className="text-xs" style={{color:C.textMuted}}>{String(p.duration||"")}</span>
                                       </div>
-                                      {(p.actions as string[]||[]).map((a:string,j:number)=><p key={j} className="text-xs" style={{color:C.textMain}}>• {a}</p>)}
+                                      {(Array.isArray(p.actions)?p.actions as string[]:[]).map((a:string,j:number)=><p key={j} className="text-xs" style={{color:C.textMain}}>• {a}</p>)}
                                       {p.kpi ? <p className="text-xs mt-1" style={{color:C.primary}}>KPI: {String(p.kpi)}</p> : null}
                                     </div>
                                   ))}
@@ -758,15 +816,15 @@ export default function ChatPage() {
                                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"8px"}}>
                                   <div style={{background:"rgba(16,185,129,0.08)",border:"1px solid rgba(16,185,129,0.25)",borderRadius:"10px",padding:"10px"}}>
                                     <p style={{color:"#10b981",fontSize:"9px",fontWeight:800,letterSpacing:"0.12em",marginBottom:"6px"}}>🎯 注目シグナル</p>
-                                    {(_s.cards?.current||[]).map((c:string,i:number)=>(<p key={i} style={{color:"#064e3b",fontSize:"10px",marginBottom:"4px",lineHeight:1.4,fontWeight:600}}>▸ {c}</p>))}
+                                    {(Array.isArray(_s.cards?.current)?_s.cards.current:[]).map((c:string,i:number)=>(<p key={i} style={{color:"#064e3b",fontSize:"10px",marginBottom:"4px",lineHeight:1.4,fontWeight:600}}>▸ {c}</p>))}
                                   </div>
                                   <div style={{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.25)",borderRadius:"10px",padding:"10px"}}>
                                     <p style={{color:"#ef4444",fontSize:"9px",fontWeight:800,letterSpacing:"0.12em",marginBottom:"6px"}}>⚠️ リスク監視</p>
-                                    {(_s.cards?.risk||[]).map((r:string,i:number)=>(<p key={i} style={{color:"#7f1d1d",fontSize:"10px",marginBottom:"4px",lineHeight:1.4,fontWeight:600}}>▸ {r}</p>))}
+                                    {(Array.isArray(_s.cards?.risk)?_s.cards.risk:[]).map((r:string,i:number)=>(<p key={i} style={{color:"#7f1d1d",fontSize:"10px",marginBottom:"4px",lineHeight:1.4,fontWeight:600}}>▸ {r}</p>))}
                                   </div>
                                   <div style={{background:"rgba(99,102,241,0.08)",border:"1px solid rgba(99,102,241,0.25)",borderRadius:"10px",padding:"10px"}}>
                                     <p style={{color:"#818cf8",fontSize:"9px",fontWeight:800,letterSpacing:"0.12em",marginBottom:"6px"}}>💡 投資アクション</p>
-                                    {(_s.cards?.plan||[]).map((p:string,i:number)=>(<p key={i} style={{color:"#312e81",fontSize:"10px",marginBottom:"4px",lineHeight:1.4,fontWeight:600}}>▸ {p}</p>))}
+                                    {(Array.isArray(_s.cards?.plan)?_s.cards.plan:[]).map((p:string,i:number)=>(<p key={i} style={{color:"#312e81",fontSize:"10px",marginBottom:"4px",lineHeight:1.4,fontWeight:600}}>▸ {p}</p>))}
                                   </div>
                                 </div>
                                 <div style={{background:"rgba(0,0,0,0.04)",borderRadius:"10px",padding:"10px 14px",display:"flex",gap:"16px",flexWrap:"wrap" as const}}>
@@ -779,7 +837,7 @@ export default function ChatPage() {
                                     <span style={{fontSize:"10px",color:"#ef4444",fontWeight:600}}>📈 機能未開放のためYsconsultingofficeにご連絡ください</span>
                                   )}
                                 </div>
-                                {(_s.actions||[]).length>0&&<div style={{display:"flex",gap:"6px",flexWrap:"wrap" as const}}>{(_s.actions||[]).map((a:string,i:number)=>(<span key={i} style={{background:"rgba(16,185,129,0.1)",border:"1px solid rgba(16,185,129,0.3)",borderRadius:"99px",padding:"4px 10px",fontSize:"10px",color:"#10b981",fontWeight:600}}>→ {a}</span>))}</div>}
+                                {(Array.isArray(_s.actions)?_s.actions:[]).length>0&&<div style={{display:"flex",gap:"6px",flexWrap:"wrap" as const}}>{(Array.isArray(_s.actions)?_s.actions:[]).map((a:string,i:number)=>(<span key={i} style={{background:"rgba(16,185,129,0.1)",border:"1px solid rgba(16,185,129,0.3)",borderRadius:"99px",padding:"4px 10px",fontSize:"10px",color:"#10b981",fontWeight:600}}>→ {a}</span>))}</div>}
                               </div>
                             );
                             return (
@@ -791,7 +849,7 @@ export default function ChatPage() {
                                 </div>
                                 {/* 3分割カード */}
                                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"6px"}}>
-                                  {_cl_cards.map(({title,items,color}:{title:string;items:string[];color:string})=>(<div key={title} style={{background:`${color}08`,border:`1px solid ${color}22`,borderRadius:"10px",padding:"10px 11px"}}><p style={{color,fontSize:"10px",fontWeight:800,marginBottom:"6px",letterSpacing:"0.04em"}}>{title}</p>{(items||[]).map((item:string,i:number)=>(<div key={i} style={{display:"flex",gap:"4px",marginBottom:"4px",alignItems:"flex-start"}}><span style={{color,fontSize:"9px",marginTop:"3px",flexShrink:0}}>▸</span><p style={{color:C.textSub,fontSize:"11px",lineHeight:1.5}}>{item}</p></div>))}</div>))}
+                                  {_cl_cards.map(({title,items,color}:{title:string;items:string[];color:string})=>(<div key={title} style={{background:`${color}08`,border:`1px solid ${color}22`,borderRadius:"10px",padding:"10px 11px"}}><p style={{color,fontSize:"10px",fontWeight:800,marginBottom:"6px",letterSpacing:"0.04em"}}>{title}</p>{(Array.isArray(items)?items:[]).map((item:string,i:number)=>(<div key={i} style={{display:"flex",gap:"4px",marginBottom:"4px",alignItems:"flex-start"}}><span style={{color,fontSize:"9px",marginTop:"3px",flexShrink:0}}>▸</span><p style={{color:C.textSub,fontSize:"11px",lineHeight:1.5}}>{item}</p></div>))}</div>))}
                                 </div>
                                 {/* AI解析ボックス */}
                                 <div style={{background:"linear-gradient(135deg,rgba(79,70,229,0.05),rgba(124,58,237,0.03))",border:"1px solid rgba(79,70,229,0.12)",borderRadius:"10px",padding:"10px 14px"}}>
@@ -806,12 +864,12 @@ export default function ChatPage() {
                                   </div>
                                 </div>
                                 {/* 次アクション */}
-                                {(_s.actions||[]).length>0 && (
+                                {(Array.isArray(_s.actions)?_s.actions:[]).length>0 && (
                                   <div>
                                     <p style={{color:C.textMuted,fontSize:"9px",fontWeight:700,letterSpacing:"0.12em",marginBottom:"5px"}}>NEXT ACTION</p>
                                     <div style={{display:"flex",flexWrap:"wrap" as const,gap:"5px"}}>
-                                      {(_s.actions||[]).map((a:string,i:number)=>(
-                                        <button key={i} onClick={()=>setInput(a)}
+                                      {(Array.isArray(_s.actions)?_s.actions:[]).map((a:string,i:number)=>(
+                                        <button key={i} onClick={()=>setInputAndSave(a)}
                                           style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,borderRadius:"99px",padding:"5px 13px",border:"none",cursor:"pointer",boxShadow:C.shadowPrimary,color:"white",fontSize:"11px",fontWeight:600}}>
                                           {a}
                                         </button>
@@ -825,7 +883,7 @@ export default function ChatPage() {
                                   <div style={{display:"flex",flexWrap:"wrap" as const,gap:"4px"}}>
                                     {([["🏗️","構造診断","structure","事業・組織の構造を解剖しボトルネックを特定"],["🎯","課題仮説","issue","状況から課題仮説を優先度付きで生成"],["⚖️","比較分析","comparison","複数案を多軸で客観比較し推奨案を提示"],["⚡","矛盾検知","contradiction","戦略・方針間の矛盾と整合性を検証"],["📋","実行計画","execution","フェーズ別・期限付きアクションプランを生成"]] as [string,string,string,string][]).map(([icon,label,tab,desc])=>(
                                       <button key={tab} onClick={()=>{
-                                        const _inputText = Array.isArray(_s.cards)?[_s.summary,..._s.cards.map((c:{title:string;items:string[]})=>`\n\n【${c.title}】\n`+(c.items||[]).join("\n"))].join(""):[_s.summary,"\n\n【現状】\n"+(_s.cards?.current||[]).join("\n"),"\n\n【問題・リスク】\n"+(_s.cards?.risk||[]).join("\n"),"\n\n【推奨方針】\n"+(_s.cards?.plan||[]).join("\n")].join("");
+                                        const _inputText = Array.isArray(_s.cards)?[_s.summary,..._s.cards.map((c:{title:string;items:string[]})=>`\n\n【${c.title}】\n`+(c.items||[]).join("\n"))].join(""):[_s.summary,"\n\n【現状】\n"+(Array.isArray(_s.cards?.current)?_s.cards.current:[]).join("\n"),"\n\n【問題・リスク】\n"+(Array.isArray(_s.cards?.risk)?_s.cards.risk:[]).join("\n"),"\n\n【推奨方針】\n"+(Array.isArray(_s.cards?.plan)?_s.cards.plan:[]).join("\n")].join("");
                                         try{sessionStorage.setItem("diag_input_"+tab, _inputText);}catch(_e){}
                                         window.location.href="/diagnosis?tab="+tab;
                                       }}
@@ -860,7 +918,7 @@ export default function ChatPage() {
                                   <p style={{color:"white",fontSize:"13px",fontWeight:700,lineHeight:1.6}}>{_s.summary}</p>
                                 </div>
                                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"6px"}}>
-                                  {_cl_cards.map(({title,items,color}:{title:string;items:string[];color:string})=>(<div key={title} style={{background:`${color}08`,border:`1px solid ${color}22`,borderRadius:"10px",padding:"10px 11px"}}><p style={{color,fontSize:"10px",fontWeight:800,marginBottom:"6px",letterSpacing:"0.04em"}}>{title}</p>{(items||[]).map((item:string,i:number)=>(<div key={i} style={{display:"flex",gap:"4px",marginBottom:"4px",alignItems:"flex-start"}}><span style={{color,fontSize:"9px",marginTop:"3px",flexShrink:0}}>▸</span><p style={{color:C.textSub,fontSize:"11px",lineHeight:1.5}}>{item}</p></div>))}</div>))}
+                                  {_cl_cards.map(({title,items,color}:{title:string;items:string[];color:string})=>(<div key={title} style={{background:`${color}08`,border:`1px solid ${color}22`,borderRadius:"10px",padding:"10px 11px"}}><p style={{color,fontSize:"10px",fontWeight:800,marginBottom:"6px",letterSpacing:"0.04em"}}>{title}</p>{(Array.isArray(items)?items:[]).map((item:string,i:number)=>(<div key={i} style={{display:"flex",gap:"4px",marginBottom:"4px",alignItems:"flex-start"}}><span style={{color,fontSize:"9px",marginTop:"3px",flexShrink:0}}>▸</span><p style={{color:C.textSub,fontSize:"11px",lineHeight:1.5}}>{item}</p></div>))}</div>))}
                                 </div>
                                 <div style={{background:"linear-gradient(135deg,rgba(79,70,229,0.05),rgba(124,58,237,0.03))",border:"1px solid rgba(79,70,229,0.12)",borderRadius:"10px",padding:"10px 14px"}}>
                                   <p style={{color:C.primary,fontSize:"9px",fontWeight:800,letterSpacing:"0.15em",marginBottom:"7px"}}>AI ANALYSIS</p>
@@ -873,12 +931,12 @@ export default function ChatPage() {
                                     ))}
                                   </div>
                                 </div>
-                                {(_s.actions||[]).length>0 && (
+                                {(Array.isArray(_s.actions)?_s.actions:[]).length>0 && (
                                   <div>
                                     <p style={{color:C.textMuted,fontSize:"9px",fontWeight:700,letterSpacing:"0.12em",marginBottom:"5px"}}>NEXT ACTION</p>
                                     <div style={{display:"flex",flexWrap:"wrap" as const,gap:"5px"}}>
-                                      {(_s.actions||[]).map((a:string,i:number)=>(
-                                        <button key={i} onClick={()=>setInput(a)}
+                                      {(Array.isArray(_s.actions)?_s.actions:[]).map((a:string,i:number)=>(
+                                        <button key={i} onClick={()=>setInputAndSave(a)}
                                           style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,borderRadius:"99px",padding:"5px 13px",border:"none",cursor:"pointer",boxShadow:C.shadowPrimary,color:"white",fontSize:"11px",fontWeight:600}}>
                                           {a}
                                         </button>
@@ -896,12 +954,14 @@ export default function ChatPage() {
                           }
                           // フォールバック: 通常Markdown
                           const _fixMd = (s:string) => {
+                            s = s.replace(/<br\s*\/?>/gi, "\n");
                             return s.split("\n").map((line:string) => {
                               const trimmed = line.trim();
                               if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
                                 const inner = trimmed.slice(1,-1);
-                                const cells = inner.split("|").map((c:string)=>c.trim());
-                                const isSep = cells.every((c:string)=>!c||/^[-: ]+$/.test(c));
+                                const cells = inner.split("|").map((c:string)=>c.trim().slice(0,300));
+                                const nonEmpty = cells.filter((c:string)=>c.length>0);
+                                const isSep = nonEmpty.length > 0 && nonEmpty.some((c:string)=>/^:?-{2,}:?$/.test(c));
                                 if (isSep) {
                                   return "|" + cells.map(()=>" --- ").join("|") + "|";
                                 }
@@ -911,11 +971,21 @@ export default function ChatPage() {
                           };
                           return (
                             <div style={{overflowX:"auto",color:C.textMain}} className="prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_table]:border-collapse [&_table]:min-w-full [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1.5 [&_td]:text-xs [&_td]:whitespace-nowrap [&_th]:border [&_th]:border-gray-200 [&_th]:px-2 [&_th]:py-1.5 [&_th]:bg-indigo-50 [&_th]:text-xs [&_th]:whitespace-nowrap [&_code]:bg-indigo-50 [&_code]:px-1 [&_code]:rounded [&_code]:text-xs">
-                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{_fixMd(m.content)}</ReactMarkdown>
+                              <ReactMarkdown
+                                remarkPlugins={[remarkGfm]}
+                                components={{
+                                  table:({children})=><div style={{overflowX:"auto",margin:"10px 0"}}><table style={{borderCollapse:"separate",borderSpacing:"4px",width:"100%",fontSize:"12px"}}>{children}</table></div>,
+                                  thead:({children})=><thead>{children}</thead>,
+                                  tbody:({children})=><tbody>{children}</tbody>,
+                                  tr:({children})=><tr>{children}</tr>,
+                                  th:({children})=><th style={{background:"rgba(79,70,229,0.12)",padding:"7px 12px",fontWeight:700,fontSize:"11px",whiteSpace:"nowrap",textAlign:"left",borderRadius:"8px",border:"none",boxShadow:"0 1px 3px rgba(79,70,229,0.15)"}}>{children}</th>,
+                                  td:({children})=><td style={{background:"rgba(255,255,255,0.7)",padding:"7px 12px",fontSize:"11px",verticalAlign:"top",borderRadius:"8px",border:"1px solid rgba(229,231,235,0.8)",boxShadow:"0 1px 2px rgba(0,0,0,0.04)"}}>{children}</td>,
+                                }}
+                              >{_fixMd(m.content)}</ReactMarkdown>
                             </div>
                           );
                         })()}
-                        {m.images && m.images.length>0 && (
+                        {Array.isArray(m.images) && m.images.length>0 && (
                           <div className="mt-3 space-y-2">
                             {m.images.map((img:any,ii:number)=>{
                               const _src = (img as any).gcs_url || (img.data ? `data:${img.mime_type};base64,${img.data}` : null);
@@ -931,7 +1001,7 @@ export default function ChatPage() {
                             })}
                           </div>
                         )}
-                        {m.tableResult && m.tableResult.columns && m.tableResult.columns.length>0 && (
+                        {m.tableResult && Array.isArray(m.tableResult.columns) && m.tableResult.columns.length>0 && (
                           <div className="mt-3">
                             <div style={{overflowX:"auto"}}>
                               <table style={{borderCollapse:"collapse",width:"100%",fontSize:"11px"}}>
@@ -955,7 +1025,7 @@ export default function ChatPage() {
                                   style={{background:"rgba(16,185,129,0.08)",border:"1px solid rgba(16,185,129,0.3)",borderRadius:"8px",color:"#059669"}}
                                   className="text-xs px-3 py-1 hover:text-green-700">📥 CSV保存</a>
                                 {["/rank","/filter","/derive","/top","/consult"].map(cmd=>(
-                                  <button key={cmd} onClick={()=>setInput(cmd+" ")}
+                                  <button key={cmd} onClick={()=>setInputAndSave(cmd+" ")}
                                     style={{background:"rgba(79,70,229,0.06)",border:`1px solid ${C.borderPrimary}`,borderRadius:"8px",color:C.primary}}
                                     className="text-xs px-2 py-1 hover:text-indigo-700">{cmd}</button>
                                 ))}
@@ -985,13 +1055,30 @@ export default function ChatPage() {
                   </div>
                 )}
 
-                {m.role==="assistant" && m.suggestions && m.suggestions.length>0 && (
+                {m.role==="assistant" && Array.isArray(m.sources) && m.sources.length > 0 && !m.sources.some((s:any)=>s.is_retrieved) && (
+                  <div style={{marginTop:"4px",marginLeft:"44px",display:"flex",alignItems:"center",gap:"4px",fontSize:"11px",color:"#f59e0b",padding:"3px 8px",background:"rgba(245,158,11,0.08)",borderRadius:"6px",border:"1px solid rgba(245,158,11,0.25)"}}>
+                    <span>⚠️</span><span>ナレッジ未検証回答</span>
+                  </div>
+                )}
+                                {m.role==="assistant" && Array.isArray(m.confirmation_choices) && m.confirmation_choices.length>0 && (
                   <div className="ml-11 mt-2 space-y-1.5">
-                    <p className="text-xs mb-1.5" style={{color:C.primary}}>💡 次に想定される事案</p>
+                    <p className="text-xs mb-1.5" style={{color:"#7c3aed"}}>🔍 対象を選択してください</p>
+                    {m.confirmation_choices.map((q,qi)=>(
+                      <button key={qi} onClick={()=>setInputAndSave(q)}
+                        style={{background:qi===0?"rgba(79,70,229,0.08)":qi===1?"rgba(16,185,129,0.08)":"rgba(245,158,11,0.08)",border:qi===0?"1.5px solid rgba(79,70,229,0.4)":qi===1?"1.5px solid rgba(16,185,129,0.4)":"1.5px solid rgba(245,158,11,0.4)",borderRadius:"12px",color:qi===0?"#4f46e5":qi===1?"#059669":"#d97706",fontWeight:700}}
+                        className="w-full text-left text-xs px-4 py-2.5 transition-all block hover:opacity-80">
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {m.role==="assistant" && Array.isArray(m.suggestions) && m.suggestions.length>0 && (
+                  <div className="ml-11 mt-2 space-y-1.5">
+                    <p className="text-xs mb-1.5" style={{color: C.primary}}>💡 次に想定される事案</p>
                     {m.suggestions.map((q,qi)=>(
-                      <button key={qi} onClick={()=>setInput(q)}
-                        style={{background:C.card, border:`1px solid ${C.borderPrimary}`, borderRadius:"12px", boxShadow:C.shadow, color:C.textSub}}
-                        className="w-full text-left text-xs px-4 py-2.5 transition-all hover:border-indigo-400 hover:text-indigo-600 block">
+                      <button key={qi} onClick={()=>setInputAndSave(q)}
+                        style={{background:C.card,border:`1px solid ${C.borderPrimary}`,borderRadius:"12px",boxShadow:C.shadow,color:C.textSub}}
+                        className="w-full text-left text-xs px-4 py-2.5 transition-all block hover:opacity-80">
                         {q}
                       </button>
                     ))}
@@ -1010,7 +1097,7 @@ export default function ChatPage() {
                     const _lastUser = [...messages].reverse().find(m=>m.role==="user");
                     const _txt = (_lastUser?.content||"").toLowerCase();
                     const _hasFile = !!_lastUser?.attachment||["pdf","excel","csv","スプレッドシート","ファイル","xlsx"].some(w=>_txt.includes(w));
-                    const _hasImgGen = ["イラスト","ロゴ","バナー","アイコン","illustration","生成して","描いて","作って"].some(w=>_txt.includes(w)) && !["解析","分析","読んで"].some(w=>_txt.includes(w));
+                    const _hasImgGen = ["イラスト","ロゴ","バナー","アイコン","illustration","描いて","作って"].some(w=>_txt.includes(w)) && !["解析","分析","読んで","リスト","一覧","手順","やること"].some(w=>_txt.includes(w));
                     const _hasImgAnalyze = !!_lastUser?.images?.length;
                     const _steps = _hasFile
                       ? ["ファイルを受信中...","内容を解析中...","構造を把握中...","インサイトを生成中...","回答を構築中...","最終調整中..."]
@@ -1019,15 +1106,18 @@ export default function ChatPage() {
                       : _hasImgGen
                       ? ["リクエストを解析中...","プロンプトを設計中...","画像を生成中...","品質を検証中...","出力を最適化中...","仕上げ中..."]
                       : ["入力を解析中...","意図を特定中...","ナレッジを検索中...","回答を構築中...","構造を解析中...","回答を整形中..."];
-                    const _label = _steps[Math.min(loadingStep,_steps.length-1)];
+                    const _label = loadingLabel || _steps[Math.min(loadingStep,_steps.length-1)];
                     return (
-                      <div className="flex items-center gap-2.5">
-                        <div style={{display:"flex",gap:"3px",alignItems:"center"}}>
-                          {[0,1,2].map(i=>(
-                            <div key={i} style={{width:"5px",height:"5px",borderRadius:"99px",background:C.primary,opacity:(loadingStep+i)%3===0?1:0.25,transition:"opacity 0.4s ease"}}/>
-                          ))}
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2.5">
+                          <div style={{display:"flex",gap:"3px",alignItems:"center"}}>
+                            <style>{`@keyframes _ld{0%,100%{opacity:1}50%{opacity:0.15}}`}</style>
+                            {[0,1,2].map(i=>(
+                              <div key={i} style={{width:"5px",height:"5px",borderRadius:"99px",background:C.primary,animation:`_ld 0.9s ease-in-out ${i*0.3}s infinite`}}/>
+                            ))}
+                          </div>
+                          <span className="text-xs font-semibold" style={{color:C.primary}}>{_label}</span>
                         </div>
-                        <span className="text-xs font-semibold" style={{color:C.primary}}>{_label}</span>
                       </div>
                     );
                   })()}
@@ -1046,7 +1136,7 @@ export default function ChatPage() {
               </div>
               <div className="space-y-2">
                 {inputExamples.map((ex,i)=>(
-                  <button key={i} onClick={()=>{setInput(ex);setShowInputExample(false);}}
+                  <button key={i} onClick={()=>{setInputAndSave(ex);setShowInputExample(false);}}
                     style={{background:"rgba(79,70,229,0.04)",border:`1px solid ${C.borderPrimary}`,borderRadius:"12px",color:C.textSub}}
                     className="w-full text-left text-xs hover:text-indigo-600 px-3 py-2 transition-all whitespace-pre-wrap">
                     {ex}
@@ -1167,7 +1257,7 @@ export default function ChatPage() {
             {conversationStarters.length > 0 && (
               <div className="flex gap-2 mb-2 flex-wrap">
                 {conversationStarters.map((s,i)=>(
-                  <button key={i} type="button" onClick={()=>setInput(s)}
+                  <button key={i} type="button" onClick={()=>setInputAndSave(s)}
                     style={{background:`rgba(79,70,229,0.08)`,border:`1px solid rgba(79,70,229,0.2)`,borderRadius:"20px",padding:"4px 12px",fontSize:"11px",color:"#4f46e5",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
                     {s}
                   </button>
@@ -1197,7 +1287,7 @@ export default function ChatPage() {
                     style={{borderRadius:"6px",fontSize:"13px",padding:"3px 6px",border:"none",cursor:"pointer",lineHeight:1,background:"rgba(0,0,0,0.04)",color:C.textMuted}}
                     className="hover:text-yellow-500 transition-all" title="入力例">💡</button>
                 </div>
-                <textarea value={input} onChange={e=>setInput(e.target.value)}
+                <textarea value={input} onChange={e=>{setInput(e.target.value);if(typeof window!=="undefined")localStorage.setItem("ascend_input_draft",e.target.value);}}
                   onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();handleSend(e as unknown as React.FormEvent);}}}
                   disabled={loading} placeholder={chatMode==="talk" ? "💬 会話モードでコンサルタントに相談... (Shift+Enterで改行)" : "🎯 相談モードでコンサルタントに相談... (Shift+Enterで改行)"}
                   rows={1} style={{background:"transparent",resize:"none",minHeight:"36px",maxHeight:"160px",color:C.textMain,flex:1}}

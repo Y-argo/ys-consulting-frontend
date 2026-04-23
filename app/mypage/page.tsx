@@ -53,6 +53,7 @@ import {
   getRankupTips, getManual, getUserGuide, getUsageLogs,
   getCustomPrompt, saveCustomPrompt, getHeaderConfig, listInquiries, getTheme,
   getUserPlan, getUserAiSettings, getAdminAiSettings, saveUserAiSettings, getUserKnowledgeList, uploadUserKnowledge, deleteUserKnowledge,
+  getRagSettings, saveRagSettings,
   UserStats, ThemeConfig,
 } from "@/lib/api";
 import AdBanner from "@/components/AdBanner";
@@ -88,9 +89,14 @@ export default function MyPage() {
   const [knowledgeFiles, setKnowledgeFiles] = useState<{source_id:string;title:string;link_id:string;chunks:number;summaries:number}[]>([]);
   const [aiSettingsSaved, setAiSettingsSaved] = useState(false);
   const [knowledgeUploading, setKnowledgeUploading] = useState(false);
+  const [sourceHistory, setSourceHistory] = useState<Array<{is_retrieved:boolean; score:number; text:string; source_id:string}>>([]);
+  const [srcLoading, setSrcLoading] = useState(false);
   const [knowledgeProgress, setKnowledgeProgress] = useState<{current:number;total:number;name:string;log:string[]}>({current:0,total:0,name:"",log:[]});
   const [useAdminSettings, setUseAdminSettings] = useState(false);
   const [memberExtraPrompt, setMemberExtraPrompt] = useState("");
+  const [ragThreshold, setRagThreshold] = useState(0.42);
+  const [ragTopK, setRagTopK] = useState(5);
+  const [ragSaved, setRagSaved] = useState(false);
   const [theme, setTheme] = useState<ThemeConfig|null>(null);
   const [settings, setSettings] = useState({
     notify_reply: true,
@@ -118,6 +124,7 @@ export default function MyPage() {
     listInquiries().then(list=>{ setInquiryUnread(list.filter(i=>i.unread_for_user).length); });
     getUserAiSettings().then(d=>{ setAiDescription(d.ai_description||""); setAiStarters(d.conversation_starters||[]); setAiStartersText((d.conversation_starters||[]).join("\n")); setUseAdminSettings(!!d.use_admin_settings); setMemberExtraPrompt(d.member_extra_prompt||""); });
     getUserKnowledgeList().then(setKnowledgeFiles);
+    getRagSettings().then(d=>{ setRagThreshold(d.threshold); setRagTopK(d.top_k); });
     getTheme().then(t=>{ setTheme(t); if(t?.favicon_url){let l=document.querySelector("link[rel~='icon']") as HTMLLinkElement;if(!l){l=document.createElement("link");l.rel="icon";document.head.appendChild(l);}l.href=t.favicon_url;} });
     // localStorageから設定を復元
     const savedTier = localStorage.getItem("ascend_ai_tier_default");
@@ -767,6 +774,64 @@ export default function MyPage() {
                   {aiSettingsSaved ? "✅ 保存しました" : "💾 AI設定を保存"}
                 </button>
                 <div>
+                  <div style={{background:"rgba(79,70,229,0.04)",border:"1px solid rgba(79,70,229,0.15)",borderRadius:"12px",padding:"14px 16px",marginBottom:"8px"}} className="space-y-2">
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                      <p className="text-xs font-bold" style={{color:"#4f46e5"}}>🔍 ソース検証ログ</p>
+                      <button onClick={async()=>{
+                        setSrcLoading(true);
+                        const {getRecentSourceHistory} = await import("@/lib/api");
+                        const h = await getRecentSourceHistory();
+                        setSourceHistory(h);
+                        setSrcLoading(false);
+                      }} style={{background:"rgba(79,70,229,0.1)",border:"1px solid rgba(79,70,229,0.25)",borderRadius:"6px",color:"#4f46e5",fontSize:"10px",fontWeight:600,cursor:"pointer",padding:"3px 8px"}}>
+                        {srcLoading ? "読込中..." : "更新"}
+                      </button>
+                    </div>
+                    {sourceHistory.length===0 && <p className="text-xs" style={{color:"#888"}}>「更新」を押してソース履歴を読み込んでください</p>}
+                    {sourceHistory.length>0 && (
+                      <div>
+                        <p className="text-xs" style={{color:"#888",marginBottom:"6px"}}>ナレッジヒット: {sourceHistory.filter(sc=>sc.is_retrieved).length} / {sourceHistory.length} 件</p>
+                        <div className="space-y-1" style={{maxHeight:"200px",overflowY:"auto"}}>
+                          {sourceHistory.slice(0,10).map((sc,i)=>(
+                            <div key={i} style={{display:"flex",alignItems:"flex-start",gap:"6px",padding:"4px 6px",background:sc.is_retrieved?"rgba(5,150,105,0.06)":"rgba(239,68,68,0.06)",border:"1px solid "+(sc.is_retrieved?"rgba(5,150,105,0.2)":"rgba(239,68,68,0.2)"),borderRadius:"6px"}}>
+                              <span style={{fontSize:"9px",fontWeight:700,color:sc.is_retrieved?"#059669":"#ef4444",flexShrink:0,marginTop:"1px"}}>{sc.is_retrieved?"✓ ヒット":"✗ 不足"}</span>
+                              <div style={{flex:1,minWidth:0}}>
+                                <p style={{fontSize:"10px",color:"#666",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sc.text}</p>
+                                <p style={{fontSize:"9px",color:"#999"}}>score: {sc.score.toFixed(3)}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                <div style={{background:"rgba(79,70,229,0.04)",border:"1px solid rgba(79,70,229,0.15)",borderRadius:"12px",padding:"14px 16px",marginBottom:"8px"}} className="space-y-3">
+                  <p className="text-xs font-bold" style={{color:"#4f46e5"}}>📡 RAG検索設定</p>
+                  <div>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:"4px"}}>
+                      <p className="text-xs font-bold" style={{color:C.textSub}}>類似度閾値（threshold）</p>
+                      <span className="text-xs font-bold" style={{color:"#4f46e5"}}>{ragThreshold.toFixed(2)}</span>
+                    </div>
+                    <input type="range" min={0.10} max={0.90} step={0.01} value={ragThreshold}
+                      onChange={e=>setRagThreshold(parseFloat(e.target.value))}
+                      style={{width:"100%",accentColor:"#4f46e5"}} />
+                    <p className="text-xs" style={{color:C.textMuted}}>低いほど広く検索。高いほど厳密にマッチ</p>
+                  </div>
+                  <div>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:"4px"}}>
+                      <p className="text-xs font-bold" style={{color:C.textSub}}>取得件数（top_k）</p>
+                      <span className="text-xs font-bold" style={{color:"#4f46e5"}}>{ragTopK}件</span>
+                    </div>
+                    <input type="range" min={1} max={20} step={1} value={ragTopK}
+                      onChange={e=>setRagTopK(parseInt(e.target.value))}
+                      style={{width:"100%",accentColor:"#4f46e5"}} />
+                  </div>
+                  <button onClick={async()=>{ await saveRagSettings(ragThreshold, ragTopK); setRagSaved(true); setTimeout(()=>setRagSaved(false),2000); }}
+                    style={{background:"linear-gradient(135deg,#4f46e5,#7c3aed)",borderRadius:"10px",border:"none",cursor:"pointer",width:"100%",padding:"8px 0"}}
+                    className="text-white font-bold text-xs">
+                    {ragSaved ? "✅ 保存しました" : "💾 RAG設定を保存"}
+                  </button>
+                </div>
                   <p className="text-xs font-bold mb-2" style={{color:C.textSub}}>知識ファイル</p>
                   {knowledgeFiles.length===0 && <p className="text-xs" style={{color:C.textMuted}}>知識ファイルはまだありません。</p>}
                   {knowledgeFiles.map(kf=>(

@@ -202,7 +202,29 @@ function DiagnosisPageInner() {
       if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail||"エラー"); }
       const d = await res.json();
       if (!d.ok) throw new Error(d.error||"エラー");
-      setStockResult(d.result);
+      let _r = d.result;
+      if (typeof _r === "string") {
+        const _c = _r.replace(/```json\s*/g,"").replace(/```/g,"").trim();
+        try { _r = JSON.parse(_c); } catch(_e) { _r = {summary: _r}; }
+      }
+      if (_r && typeof _r === "object") {
+        // summaryフィールドがJSON文字列全体の場合パースし直す
+        if (typeof _r.summary === "string" && _r.summary.trim().startsWith("{")) {
+          try {
+            const _parsed = JSON.parse(_r.summary.replace(/```json\s*/g,"").replace(/```/g,"").trim());
+            if (_parsed && typeof _parsed === "object" && _parsed.code) { _r = _parsed; }
+          } catch(_e) {}
+        }
+        const _clean = (v: unknown) => typeof v === "string" ? v.replace(/```json\s*/g,"").replace(/```/g,"").trim() : v;
+        Object.keys(_r).forEach(k => { _r[k] = _clean(_r[k]); });
+        if (_r.signal_analysis && typeof _r.signal_analysis === "object") {
+          Object.keys(_r.signal_analysis).forEach(k => { _r.signal_analysis[k] = _clean(_r.signal_analysis[k]); });
+        }
+        if (_r.strategy && typeof _r.strategy === "object") {
+          Object.keys(_r.strategy).forEach(k => { _r.strategy[k] = _clean(_r.strategy[k]); });
+        }
+      }
+      setStockResult(_r);
     } catch(e:unknown) { setError(e instanceof Error ? e.message : "エラー"); }
     finally { setStockLoading(false); }
   }
@@ -211,7 +233,13 @@ function DiagnosisPageInner() {
     setAnalysisLoading(true);
     try {
       const res = await fetch(`${API_BASE}/api/investment/analysis`, { headers: authHeaders() });
-      if (res.ok) { const d = await res.json(); if(d.ok) { setAnalysisData(d); setSignals(d.latest); } }
+      if (res.ok) { const d = await res.json(); if(d.ok) {
+        if (typeof d.analysis === "string") {
+          const _clean = d.analysis.replace(/^```json\s*/,"").replace(/\s*```$/,"").trim();
+          try { d.analysis = JSON.parse(_clean); } catch(_e) { d.analysis = {market_summary: d.analysis}; }
+        }
+        setAnalysisData(d); setSignals(d.latest);
+      } }
     } catch {} finally { setAnalysisLoading(false); }
   }
 
@@ -991,7 +1019,7 @@ function DiagnosisPageInner() {
                               <tr key={i} style={{background:i%2===0?"transparent":"rgba(0,0,0,0.015)"}}>
                                 <td style={{border:`1px solid ${C.border}`,padding:"6px 10px",color:C.textMuted,fontSize:"11px"}}>{i+1}</td>
                                 <td style={{border:`1px solid ${C.border}`,padding:"6px 10px",color:C.primary,fontWeight:700}}>{String(r.code||"")}</td>
-                                <td style={{border:`1px solid ${C.border}`,padding:"6px 10px",color:C.textMain}}>{String(r.company_name||"")}</td>
+                                <td style={{border:`1px solid ${C.border}`,padding:"6px 10px",color:C.textMain,minWidth:"120px"}}>{String(r.company_name||"")}</td>
                                 <td style={{border:`1px solid ${C.border}`,padding:"6px 10px",color:C.textMuted,fontSize:"11px"}}>{String(r.sector||"")}</td>
                                 <td style={{border:`1px solid ${C.border}`,padding:"6px 10px",color:C.textMuted,fontSize:"11px"}}>{String(r.asof_date||"")}</td>
                                 <td style={{border:`1px solid ${C.border}`,padding:"6px 10px",color:C.textMain,textAlign:"right" as const,fontWeight:600}}>{String(r.close||"")}</td>
