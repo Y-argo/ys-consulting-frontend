@@ -1055,7 +1055,7 @@ export default function ChatPage() {
                   </div>
                 )}
 
-                {m.role==="assistant" && Array.isArray(m.sources) && m.sources.length > 0 && !m.sources.some((s:any)=>s.is_retrieved) && (
+                {m.role==="assistant" && Array.isArray(m.sources) && !m.sources.some((s:any)=>s.is_retrieved) && (
                   <div style={{marginTop:"4px",marginLeft:"44px",display:"flex",alignItems:"center",gap:"4px",fontSize:"11px",color:"#f59e0b",padding:"3px 8px",background:"rgba(245,158,11,0.08)",borderRadius:"6px",border:"1px solid rgba(245,158,11,0.25)"}}>
                     <span>⚠️</span><span>ナレッジ未検証回答</span>
                   </div>
