@@ -222,6 +222,7 @@ export interface UserStats {
   is_unlimited?: boolean;
   expires_at?: string;
   level_last_delta?: number;
+  tenant_id?: string;
 }
 
 export async function getUserStats(): Promise<UserStats | null> {
@@ -688,4 +689,24 @@ export async function getRecentSourceHistory(): Promise<Array<{is_retrieved:bool
     const data = await res.json();
     return data.sources || [];
   } catch { return []; }
+}
+export async function generateSlides(theme: string, purpose: string, audience: string, slideCount: number): Promise<{ok:boolean;data:any}> {
+  try {
+    const res = await fetch(`${API_BASE}/api/user/generate_slides`, {
+      method: "POST", headers: authHeaders() as Record<string, string>,
+      body: JSON.stringify({ theme, purpose, audience, slide_count: slideCount }),
+    });
+    if (!res.ok) return { ok: false, data: null };
+    return res.json();
+  } catch { return { ok: false, data: null }; }
+}
+export async function generateEventPlan(fields: Record<string,string>): Promise<{ok:boolean;data:any}> {
+  try {
+    const res = await fetch(`${API_BASE}/api/user/generate_event_plan`, {
+      method: "POST", headers: authHeaders() as Record<string, string>,
+      body: JSON.stringify(fields),
+    });
+    if (!res.ok) return { ok: false, data: null };
+    return res.json();
+  } catch { return { ok: false, data: null }; }
 }

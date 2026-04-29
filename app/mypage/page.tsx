@@ -48,6 +48,7 @@ function GalleryInner({uid, C}: {uid:string, C:any}) {
 }
 import dynamic from "next/dynamic";
 const ReactMarkdown = dynamic(() => import("react-markdown"), { ssr: false, loading: () => null });
+import PresentationTool from "@/app/mypage/PresentationTool";
 import {
   getStoredUser, logout, getUserStats, getFcReport, getMyFeatures,
   getRankupTips, getManual, getUserGuide, getUsageLogs,
@@ -57,7 +58,7 @@ import {
   UserStats, ThemeConfig,
 } from "@/lib/api";
 import AdBanner from "@/components/AdBanner";
-type Tab = "overview"|"metrics"|"fc"|"dm"|"logs"|"rankup"|"manual"|"guide"|"about"|"cookie"|"settings"|"gallery";
+type Tab = "overview"|"metrics"|"fc"|"dm"|"logs"|"rankup"|"manual"|"guide"|"about"|"cookie"|"settings"|"gallery"|"presentation";
 const C = {
   bg:"#f8f9fc", card:"#ffffff", primary:"#4f46e5", primary2:"#7c3aed",
   textMain:"#111827", textSub:"#6b7280", textMuted:"#9ca3af",
@@ -158,6 +159,7 @@ export default function MyPage() {
     {id:"guide",label:"📝 ガイド"},
     {id:"logs",label:"📋 履歴"},
     ...(features?.image_generation!==false ? [{id:"gallery" as Tab,label:"🎨 ギャラリー"}] : []),
+    {id:"presentation" as Tab,label:"📊 プレゼン資料"},
     {id:"cookie",label:"🍪 Cookie"},
     {id:"settings",label:"⚙️ 設定"},
   ] as {id:Tab;label:string;badge?:number}[];
@@ -286,6 +288,7 @@ export default function MyPage() {
                 {([["🔬","現状課題診断","diagnosis",true],["🏗️","構造診断","structure",features.diag_structure!==false],["🎯","課題仮説","issue",features.diag_issue!==false],["⚖️","比較分析","comparison",features.diag_comparison!==false],["⚡","矛盾検知","contradiction",features.diag_contradiction!==false],["📋","実行計画","execution",features.diag_execution!==false],["📈","投資シグナル","investment",features.diag_investment===true],["📊","会話の可視化","graph",features.diag_graph!==false],["🧾","ファイル診断","file",features.diag_file!==false]] as [string,string,string,boolean][]).map(([icon,label,tab,enabled])=>(
                   <button key={tab} onClick={()=>{
                     if(!enabled){alert("この機能は現在ご利用いただけません。\nYs Consulting Officeにご連絡ください。");return;}
+                    if(tab==="__presentation"){router.push("/mypage?tab=presentation");return;}
                     router.push(`/diagnosis?tab=${tab}`);
                   }} style={{background:enabled?"linear-gradient(135deg,rgba(99,102,241,0.35),rgba(139,92,246,0.35))":"rgba(100,100,100,0.06)",border:enabled?"1px solid rgba(139,92,246,0.7)":"1px solid rgba(100,100,100,0.15)",borderRadius:"8px",padding:"4px 10px",color:enabled?"#ffffff":"rgba(150,150,150,0.5)",fontSize:"11px",fontWeight:enabled?"700":"400",cursor:enabled?"pointer":"default",whiteSpace:"nowrap",opacity:enabled?1:0.4,boxShadow:enabled?"0 0 8px rgba(139,92,246,0.3)":"none"}}>{icon} {label}</button>
                 ))}
@@ -629,6 +632,11 @@ export default function MyPage() {
           </div>
         )}
 
+        {/* プレゼン資料 */}
+        {tab==="presentation" && (
+          <PresentationTool />
+        )}
+
         {/* 設定 */}
         {tab==="settings" && (
           <div className="space-y-4">
@@ -678,9 +686,9 @@ export default function MyPage() {
                 <span className="text-sm" style={{color:C.textSub}}>デフォルトエンジン</span>
                 <select value={settings.ai_tier_default} onChange={e=>setSettings(p=>({...p,ai_tier_default:e.target.value}))}
                   style={{background:`rgba(79,70,229,0.06)`,border:`1px solid ${C.borderPrimary}`,borderRadius:"10px",color:C.primary,padding:"6px 12px",fontSize:"13px"}}>
-                  <option value="core">Core（標準）</option>
-                  {ultraEnabled && <option value="ultra">Ultra（高精度）</option>}
-                  {apexEnabled && <option value="apex">Apex（最上位）</option>}
+                  <option value="core">SWIFT（迅速）</option>
+                  {ultraEnabled && <option value="ultra">ADVANCE（高度）</option>}
+                  {apexEnabled && <option value="apex">SUPREME（至高）</option>}
                 </select>
               </div>
             </div>

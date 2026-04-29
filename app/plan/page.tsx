@@ -10,7 +10,7 @@ const PLANS = [
     price: "¥0",
     color: "#6b7280",
     badge: "無料",
-    engine: "Core",
+    engine: "SWIFT",
     modes: "AUTOのみ",
     features: [
       "AIチャット（AUTOモード）",
@@ -32,7 +32,7 @@ const PLANS = [
     price: "¥9,800",
     color: "#3b82f6",
     badge: "スタンダード",
-    engine: "Core",
+    engine: "SWIFT",
     modes: "7モード対応",
     features: [
       "AIチャット（7モード）",
@@ -44,11 +44,11 @@ const PLANS = [
       "画像・ファイル解析（チャット内）",
     ],
     locked: [
-      "ファイル診断（Ultraエンジン）",
+      "ファイル診断（ADVANCEエンジン）",
       "固定概念レポート",
       "個人相談",
       "投資シグナル",
-      "ASCEND Ultra / Apex",
+      "ASCEND ADVANCE / SUPREME",
     ],
   },
   {
@@ -57,7 +57,7 @@ const PLANS = [
     price: "¥39,800",
     color: "#8b5cf6",
     badge: "プロ",
-    engine: "Ultra",
+    engine: "ADVANCE",
     modes: "全19モード対応",
     features: [
       "AIチャット（全19モード）",
@@ -68,11 +68,11 @@ const PLANS = [
       "固定概念レポート（LGBM自動生成）",
       "画像生成・画像ギャラリー",
       "個人相談（スレッド往復）",
-      "ASCEND Ultra解放",
+      "ASCEND ADVANCE解放",
     ],
     locked: [
       "投資シグナル",
-      "ASCEND Apex",
+      "ASCEND SUPREME",
     ],
   },
   {
@@ -81,14 +81,14 @@ const PLANS = [
     price: "¥89,800",
     color: "#f59e0b",
     badge: "最上位",
-    engine: "Apex",
+    engine: "SUPREME",
     modes: "全19モード対応",
     features: [
       "全機能すべて解放",
       "AIチャット（全19モード）",
       "ファイル診断・固定概念レポート",
       "投資シグナル（全銘柄）",
-      "ASCEND Apex（最上位AIエンジン）",
+      "ASCEND SUPREME（最上位AIエンジン）",
       "個人相談・画像生成・ギャラリー",
       "診断タブ全8種（投資シグナルタブ含む）",
       "🤖 ユーザー専用AI設定（説明・指示・会話のきっかけ・知識ファイル）",
@@ -101,7 +101,7 @@ const PLANS = [
     price: "¥300,000",
     color: "#e11d48",
     badge: "顧問契約",
-    engine: "Apex",
+    engine: "SUPREME",
     modes: "全19モード対応",
     features: [
       "ASCEND全機能完全解放",

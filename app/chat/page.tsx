@@ -61,6 +61,7 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false);
   const [chatId, setChatId] = useState("main");
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [aiTier, setAiTier] = useState("core");
   const [ultraEnabled, setUltraEnabled] = useState(false);
   const [conversationStarters, setConversationStarters] = useState<string[]>([]);
@@ -70,11 +71,11 @@ export default function ChatPage() {
   const [currentPlan, setCurrentPlan] = useState<string>("");
   const [usageLogs, setUsageLogs] = useState<{prompt:string;timestamp:string}[]>([]);
   const [purposeMode, setPurposeMode] = useState("AUTO");
+  const [displayModeBar, setDisplayModeBar] = useState(true);
   const [chatMode, setChatMode] = useState<"talk"|"consult">("consult");
   const [modal, setModal] = useState<Modal>("none");
   const [modalContent, setModalContent] = useState("");
   const [renameVal, setRenameVal] = useState("");
-  const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [fcData, setFcData] = useState<{report:Record<string,unknown>|null;use_count_since_report:number}>({report:null,use_count_since_report:0});
   const [headerCfg, setHeaderCfg] = useState<Record<string,string>>({});
   const [leftOpen, setLeftOpen] = useState(false);
@@ -107,6 +108,8 @@ export default function ChatPage() {
 
   useEffect(() => {
     const savedMode = localStorage.getItem("ascend_chat_mode");
+    const savedModeBar = localStorage.getItem("ascend_display_mode_bar");
+    if (savedModeBar !== null) setDisplayModeBar(savedModeBar === "true");
     if (savedMode === "talk" || savedMode === "consult") setChatMode(savedMode);
     setLeftOpen(window.innerWidth >= 768);
     const user = getStoredUser();
@@ -156,21 +159,25 @@ export default function ChatPage() {
 
     // セッションタイムアウト監視
     let _timeoutMin = 60;
-    fetch("/api/user/session_timeout", {headers:{"Authorization":`Bearer ${localStorage.getItem("ascend_token")||""}`}})
-      .then(r=>r.json()).then(d=>{ _timeoutMin = d.session_timeout_minutes||60; }).catch(()=>{});
     const _lastAct = {ts: Date.now()};
     const _updateAct = () => { _lastAct.ts = Date.now(); };
     window.addEventListener("mousemove", _updateAct);
     window.addEventListener("keydown", _updateAct);
     window.addEventListener("click", _updateAct);
-    const _timer = setInterval(() => {
-      if (Date.now() - _lastAct.ts > _timeoutMin * 60 * 1000) {
-        logout();
-        router.push("/");
-      }
-    }, 30000);
+    let _timer: ReturnType<typeof setInterval> | null = null;
+    const _startTimer = (min: number) => {
+      if (_timer) clearInterval(_timer);
+      _timer = setInterval(() => {
+        if (Date.now() - _lastAct.ts > min * 60 * 1000) {
+          logout();
+          router.push("/");
+        }
+      }, 30000);
+    };
+    fetch("/api/user/session_timeout", {headers:{"Authorization":`Bearer ${localStorage.getItem("ascend_token")||""}`}})
+      .then(r=>r.json()).then(d=>{ _timeoutMin = d.session_timeout_minutes||60; _startTimer(_timeoutMin); }).catch(()=>{ _startTimer(_timeoutMin); });
     return () => {
-      clearInterval(_timer);
+      if (_timer) clearInterval(_timer);
       window.removeEventListener("mousemove", _updateAct);
       window.removeEventListener("keydown", _updateAct);
       window.removeEventListener("click", _updateAct);
@@ -186,11 +193,13 @@ export default function ChatPage() {
   async function fetchSessions(preserveChatId?: string) {
     const s = await listSessions();
     if (s.length > 0) {
-      setSessions(s);
-      // 現在のchatIdがリストにない場合（新規作成直後のリロード等）は先頭に追加
       if (preserveChatId && !s.find(x => x.chat_id === preserveChatId)) {
-        setSessions(prev => [{chat_id: preserveChatId, title: "新しいチャット"}, ...s]);
+        setSessions([{chat_id: preserveChatId, title: "新しいチャット"}, ...s]);
+      } else {
+        setSessions(s);
       }
+    } else if (preserveChatId) {
+      setSessions([{chat_id: preserveChatId, title: "新しいチャット"}]);
     } else {
       setSessions([{chat_id:"main", title:"メインチャット"}]);
     }
@@ -360,8 +369,6 @@ export default function ChatPage() {
     setIsCreatingSession(true);
     try {
       const cid = await newSession();
-      const _existing = JSON.parse(localStorage.getItem("ascend_created_chats") || "[]");
-      localStorage.setItem("ascend_created_chats", JSON.stringify([..._existing, cid]));
       setMessages([]);
       setChatId(cid);
       setSessions(prev => [{chat_id: cid, title: "新しいチャット"}, ...prev]);
@@ -447,9 +454,9 @@ export default function ChatPage() {
           <div style={{background:"rgba(79,70,229,0.08)",border:`1px solid ${C.borderPrimary}`,borderRadius:"10px"}} className="px-2 py-1 flex items-center gap-1">
             <span className="text-xs" style={{color:C.primary}}>⚡</span>
             <select value={aiTier} onChange={e=>setAiTier(e.target.value)} style={{background:"transparent",color:C.primary}} className="text-xs focus:outline-none cursor-pointer">
-              <option value="core" style={{background:"#fff",color:"#111"}}>Core（標準）</option>
-              {ultraEnabled && <option value="ultra" style={{background:"#fff",color:"#111"}}>Ultra（高精度）</option>}
-              {apexEnabled  && <option value="apex"  style={{background:"#fff",color:"#111"}}>Apex（最上位）</option>}
+              <option value="core" style={{background:"#fff",color:"#111"}}>SWIFT（迅速）</option>
+              {ultraEnabled && <option value="ultra" style={{background:"#fff",color:"#111"}}>ADVANCE（高度）</option>}
+              {apexEnabled  && <option value="apex"  style={{background:"#fff",color:"#111"}}>SUPREME（至高）</option>}
             </select>
           </div>
           <button onClick={()=>router.push("/mypage")} style={{background:`linear-gradient(135deg,rgba(79,70,229,0.1),rgba(124,58,237,0.1))`,border:`1px solid ${C.borderPrimary}`,borderRadius:"10px",color:C.primary,display:"flex",alignItems:"center",gap:"4px",padding:"4px 8px 4px 4px"}} className="transition-all hover:opacity-80">
@@ -644,6 +651,7 @@ export default function ChatPage() {
         {/* MAIN */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* モードバー */}
+          {displayModeBar && (
           <div style={{background:C.card, borderBottom:`1px solid ${C.border}`, overflowX:"auto", scrollbarWidth:"none"}} className="flex items-center gap-1.5 px-4 py-2 flex-shrink-0 [&::-webkit-scrollbar]:hidden">
 
             <span style={{fontSize:"10px",fontWeight:700,color:C.textMuted,letterSpacing:"0.12em",whiteSpace:"nowrap",flexShrink:0,paddingRight:"4px"}}>モード選択</span>
@@ -658,6 +666,7 @@ export default function ChatPage() {
               </button>
             ))}
           </div>
+          )}
           {/* フィードバックトースト */}
           {feedbackToast && (
             <div style={{position:"fixed",bottom:"80px",left:"50%",transform:"translateX(-50%)",background:"rgba(30,30,40,0.92)",color:"white",borderRadius:"12px",padding:"10px 24px",fontSize:"13px",fontWeight:600,zIndex:9999,boxShadow:"0 4px 20px rgba(0,0,0,0.3)",whiteSpace:"nowrap"}}>
@@ -683,11 +692,11 @@ export default function ChatPage() {
                   <p className="text-xs mt-1" style={{color:C.textMuted}}>何でも相談してください</p>
                 </div>
                 <div className="grid grid-cols-2 gap-2 max-w-lg w-full">
-                  {["売上を上げる戦略を教えて","リスクを最小化する方法は？","競合分析をしてほしい","意思決定の優先順位を整理したい"].map(q=>(
-                    <button key={q} onClick={()=>setInputAndSave(q)}
+                  {([{label:"📖 マニュアル",action:()=>openModal("manual")},{label:"📝 ガイド",action:()=>openModal("guide")},{label:"🏆 ランクアップ",action:()=>openModal("rankup")},{label:"ℹ️ ASCENDとは",action:()=>openModal("about")},{label:"🔬 診断・分析",action:()=>router.push("/diagnosis")},{label:"⚙️ 設定",action:()=>router.push("/mypage")}]).map(item=>(
+                    <button key={item.label} onClick={item.action}
                       style={{background:C.card, border:`1px solid ${C.border}`, boxShadow:C.shadow, borderRadius:"12px"}}
                       className="text-xs text-left p-3 hover:border-indigo-300 hover:shadow-md transition-all">
-                      {q} →
+                      {item.label}
                     </button>
                   ))}
                 </div>
@@ -1055,7 +1064,7 @@ export default function ChatPage() {
                   </div>
                 )}
 
-                {m.role==="assistant" && Array.isArray(m.sources) && !m.sources.some((s:any)=>s.is_retrieved) && (
+                {m.role==="assistant" && Array.isArray(m.sources) && m.sources.length > 0 && !m.sources.some((s:any)=>s.is_retrieved) && (
                   <div style={{marginTop:"4px",marginLeft:"44px",display:"flex",alignItems:"center",gap:"4px",fontSize:"11px",color:"#f59e0b",padding:"3px 8px",background:"rgba(245,158,11,0.08)",borderRadius:"6px",border:"1px solid rgba(245,158,11,0.25)"}}>
                     <span>⚠️</span><span>ナレッジ未検証回答</span>
                   </div>
@@ -1332,13 +1341,36 @@ export default function ChatPage() {
                   <button onClick={handleRename} style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`}} className="w-full text-white font-bold rounded-2xl py-3 text-sm hover:opacity-90">変更する</button>
                 </div>
               )}
+              {modal==="about" && (
+                <div className="space-y-4">
+                  <p style={{fontWeight:900,fontSize:"22px",textAlign:"center",color:"#6366f1",letterSpacing:"6px",marginBottom:"4px"}}>ASCEND</p>
+                  <div style={{background:"rgba(99,102,241,0.08)",border:"1px solid rgba(99,102,241,0.25)",borderRadius:"16px",padding:"20px"}}>
+                    <p className="text-sm font-bold mb-3" style={{color:"#6366f1"}}>■ 名称の意味</p>
+                    <div className="space-y-3 text-sm">
+                      <p style={{color:"#111827"}}><span style={{color:"#6366f1",fontWeight:900}}>A</span> — Architectural Analysis（構造解剖）</p>
+                      <p style={{color:"#111827"}}><span style={{color:"#6366f1",fontWeight:900}}>S</span> — Scoring &amp; Scale（階級スコア）</p>
+                      <p style={{color:"#111827"}}><span style={{color:"#6366f1",fontWeight:900}}>C</span> — Case-driven RAG（事例駆動検索）</p>
+                      <p style={{color:"#111827"}}><span style={{color:"#6366f1",fontWeight:900}}>E</span> — Executor Strategy（戦術執行）</p>
+                      <p style={{color:"#111827"}}><span style={{color:"#6366f1",fontWeight:900}}>N</span> — Nurturing / Mentor（育成・導師）</p>
+                      <p style={{color:"#111827"}}><span style={{color:"#6366f1",fontWeight:900}}>D</span> — Dynamic Routing &amp; Diagnosis（動的診断）</p>
+                    </div>
+                  </div>
+                  {stats?.tenant_id && (
+                    <div style={{background:"rgba(99,102,241,0.06)",border:"1px solid rgba(99,102,241,0.15)",borderRadius:"12px",padding:"12px 16px",textAlign:"center"}}>
+                      <p className="text-xs" style={{color:"#6b7280",marginBottom:"2px"}}>登録業種</p>
+                      <p className="text-sm font-bold" style={{color:"#111827"}}>{stats.tenant_id}</p>
+                    </div>
+                  )}
+                  <p className="text-xs text-center" style={{color:"#6b7280"}}>戦略・数値・構造・リスク——あらゆる経営判断に即応するAIコンサルティングエンジン</p>
+                </div>
+              )}
               {modal==="logs" && (
                 <div className="space-y-2">
                   {usageLogs.length===0
                     ? <p className="text-sm text-center py-8" style={{color:C.textMuted}}>履歴がありません</p>
                     : usageLogs.map((l,i)=>(
                       <div key={i} style={{background:"rgba(0,0,0,0.02)",border:`1px solid ${C.border}`,borderRadius:"14px"}} className="px-4 py-3">
-                        <p className="text-xs mb-1" style={{color:C.textMuted}}>{l.timestamp.slice(0,16)}</p>
+                        <p className="text-xs mb-1" style={{color:C.textMuted}}>{new Date(l.timestamp).toLocaleString("ja-JP",{timeZone:"Asia/Tokyo",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}</p>
                         <p className="text-sm truncate" style={{color:C.textSub}}>{l.prompt}</p>
                       </div>
                     ))

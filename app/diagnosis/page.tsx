@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 const ReactMarkdown = dynamic(() => import("react-markdown"), { ssr: false, loading: () => null });
 const FileDiagnosis = dynamic(() => import("./FileDiagnosis"), { ssr: false, loading: () => null });
+const PresentationTool = dynamic(() => import("../mypage/PresentationTool"), { ssr: false, loading: () => null });
 import { getStoredUser, getUserStats, UserStats, getMyFeatures } from "@/lib/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
@@ -13,7 +14,7 @@ function authHeaders(): HeadersInit {
   return token ? { "Content-Type": "application/json", Authorization: `Bearer ${token}` } : { "Content-Type": "application/json" };
 }
 
-type TabId = "diagnosis"|"structure"|"issue"|"comparison"|"contradiction"|"execution"|"investment"|"graph"|"file";
+type TabId = "diagnosis"|"structure"|"issue"|"comparison"|"contradiction"|"execution"|"investment"|"graph"|"file"|"presentation";
 
 const C = {
   bg:"#f8f9fc", card:"#ffffff", primary:"#4f46e5", primary2:"#7c3aed",
@@ -286,6 +287,7 @@ function DiagnosisPageInner() {
     {id:"investment",label:"📈 投資シグナル",flag:"diag_investment"},
     {id:"graph",label:"📊 会話の可視化",flag:"diag_graph"},
     {id:"file",label:"🧾 ファイル診断",flag:"diag_file"},
+    {id:"presentation",label:"📊 プレゼン資料",flag:"diag_presentation"},
   ];
   const TABS = allTabs.filter(t=>!t.flag || features[t.flag] !== false);
 
@@ -1274,6 +1276,10 @@ function DiagnosisPageInner() {
               </div>
             )}
           </div>
+        )}
+
+        {tab==="presentation" && (
+          <PresentationTool />
         )}
 
         {tab==="file" && (
