@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import AutoLogout from "@/app/components/AutoLogout";
 
 export const metadata: Metadata = {
   title: "ASCEND",
   description: "Ys Consulting Office",
 };
-
 export default function RootLayout({
   children,
 }: {
@@ -13,7 +13,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ja">
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        <AutoLogout />
+        {children}
+      </body>
     </html>
   );
 }

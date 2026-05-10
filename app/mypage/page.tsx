@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 function GalleryInner({uid, C}: {uid:string, C:any}) {
   const [images, setImages] = useState<any[]>([]);
@@ -66,8 +66,9 @@ const C = {
   shadow:"0 1px 3px rgba(0,0,0,0.08)", shadowMd:"0 4px 16px rgba(0,0,0,0.08)",
   shadowPrimary:"0 4px 16px rgba(79,70,229,0.2)",
 };
-export default function MyPage() {
+function MyPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [uid, setUid] = useState("");
   const [stats, setStats] = useState<UserStats|null>(null);
   const [fcData, setFcData] = useState<{report:Record<string,unknown>|null;use_count_since_report:number}>({report:null,use_count_since_report:0});
@@ -113,6 +114,8 @@ export default function MyPage() {
     font_size: "medium",
   });
   useEffect(() => {
+    const urlTab = searchParams.get("tab") as Tab;
+    if (urlTab) switchTab(urlTab);
     const user = getStoredUser();
     if (!user) { router.push("/"); return; }
     getUserPlan().then((p) => setCurrentPlan(p));
@@ -139,6 +142,7 @@ export default function MyPage() {
     }));
   }, []);
   async function switchTab(t: Tab) {
+    if (t==="presentation") { window.location.href="/diagnosis"; return; }
     setTab(t); setContent("");
     if (t==="rankup") { setLoading(true); const c = await getRankupTips(); setContent(c); setLoading(false); }
     if (t==="manual") { setLoading(true); const c = await getManual(); setContent(c); setLoading(false); }
@@ -159,7 +163,7 @@ export default function MyPage() {
     {id:"guide",label:"📝 ガイド"},
     {id:"logs",label:"📋 履歴"},
     ...(features?.image_generation!==false ? [{id:"gallery" as Tab,label:"🎨 ギャラリー"}] : []),
-    {id:"presentation" as Tab,label:"📊 プレゼン資料"},
+    {id:"presentation" as Tab,label:"📊 診断・分析"},
     {id:"cookie",label:"🍪 Cookie"},
     {id:"settings",label:"⚙️ 設定"},
   ] as {id:Tab;label:string;badge?:number}[];
@@ -285,7 +289,7 @@ export default function MyPage() {
               <p className="text-xs" style={{color:C.textMuted}}>累計 {stats.total_chat_count} チャット / 12回ごとに生成</p>
               <button onClick={()=>router.push("/diagnosis")} style={{background:stats.diag_available?"linear-gradient(135deg,#10b981,#059669)":"linear-gradient(135deg,#4f46e5,#7c3aed)",borderRadius:"12px",boxShadow:stats.diag_available?"0 4px 12px rgba(16,185,129,0.3)":"0 4px 12px rgba(79,70,229,0.3)"}} className="w-full mt-3 text-white font-bold py-2 text-sm hover:opacity-90 transition-all">{stats.diag_available?"🔬 診断レポートを生成 →":"📊 診断・分析ページへ →"}</button>
               <div style={{display:"flex",gap:"6px",flexWrap:"wrap",marginTop:"8px"}}>
-                {([["🔬","現状課題診断","diagnosis",true],["🏗️","構造診断","structure",features.diag_structure!==false],["🎯","課題仮説","issue",features.diag_issue!==false],["⚖️","比較分析","comparison",features.diag_comparison!==false],["⚡","矛盾検知","contradiction",features.diag_contradiction!==false],["📋","実行計画","execution",features.diag_execution!==false],["📈","投資シグナル","investment",features.diag_investment===true],["📊","会話の可視化","graph",features.diag_graph!==false],["🧾","ファイル診断","file",features.diag_file!==false]] as [string,string,string,boolean][]).map(([icon,label,tab,enabled])=>(
+                {([["🔬","現状課題診断","diagnosis",true],["🏗️","構造診断","structure",features.diag_structure===true],["🎯","課題仮説","issue",features.diag_issue===true],["⚖️","比較分析","comparison",features.diag_comparison===true],["⚡","矛盾検知","contradiction",features.diag_contradiction===true],["📋","実行計画","execution",features.diag_execution===true],["📈","投資シグナル","investment",features.diag_investment===true],["📊","会話の可視化","graph",features.diag_graph===true],["🧾","ファイル診断","file",features.diag_file===true],["📊","プレゼン資料","presentation",features.diag_presentation===true],["🔮","未来分岐シミュレーター","future",features.diag_future===true]] as [string,string,string,boolean][]).map(([icon,label,tab,enabled])=>(
                   <button key={tab} onClick={()=>{
                     if(!enabled){alert("この機能は現在ご利用いただけません。\nYs Consulting Officeにご連絡ください。");return;}
                     if(tab==="__presentation"){router.push("/mypage?tab=presentation");return;}
@@ -346,93 +350,96 @@ export default function MyPage() {
 
         {/* Decision Metrics */}
         {tab==="metrics" && (
-          <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"24px",boxShadow:C.shadowMd,overflow:"hidden"}}>
+          <div style={{display:"flex",flexDirection:"column" as const,gap:"16px"}}>
             {dm ? (
               <>
-                {/* ダークヘッダー */}
-                <div style={{background:"linear-gradient(135deg,#0f0c29,#302b63,#24243e)",padding:"24px 24px 20px"}}>
-                  <p style={{color:"rgba(255,255,255,0.35)",fontSize:"9px",letterSpacing:"0.2em",fontWeight:700,marginBottom:"8px"}}>DECISION INTELLIGENCE MATRIX</p>
-                  <div className="flex items-start justify-between" style={{marginBottom:"18px"}}>
-                    <div>
-                      <h2 style={{color:"white",fontWeight:900,fontSize:"18px",marginBottom:"4px"}}>意思決定精度診断</h2>
-                      <p style={{color:"rgba(255,255,255,0.38)",fontSize:"11px",lineHeight:1.5}}>
-                        {Number(dm.diagnosis_total_score||0)>=80?"全指標が高水準で安定しています":Number(dm.diagnosis_total_score||0)>=65?"複数の指標に改善余地があります":Number(dm.diagnosis_total_score||0)>=50?"重点的な強化が必要な指標があります":"判断構造に根本的な課題があります"}
-                      </p>
+                <div style={{background:"linear-gradient(135deg,#080612,#1a1035,#0d1225)",borderRadius:"20px",overflow:"hidden",boxShadow:"0 20px 60px rgba(0,0,0,0.5)",border:"1px solid rgba(255,255,255,0.06)"}}>
+                  <div style={{padding:"28px 28px 24px"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"20px"}}>
+                      <div style={{width:"3px",height:"18px",background:"linear-gradient(180deg,#a78bfa,#6366f1)",borderRadius:"2px"}}/>
+                      <p style={{color:"rgba(167,139,250,0.7)",fontSize:"9px",letterSpacing:"0.25em",fontWeight:800}}>DECISION INTELLIGENCE MATRIX</p>
                     </div>
-                    <div style={{textAlign:"center" as const,flexShrink:0,marginLeft:"16px"}}>
-                      <div style={{
-                        background:String(dm.diagnosis_rank||"C")==="S"?"linear-gradient(135deg,#f59e0b,#ef4444)":String(dm.diagnosis_rank||"C").startsWith("A")?"linear-gradient(135deg,#6366f1,#8b5cf6)":String(dm.diagnosis_rank||"C").startsWith("B")?"linear-gradient(135deg,#0891b2,#06b6d4)":"linear-gradient(135deg,#6b7280,#9ca3af)",
-                        borderRadius:"14px",padding:"8px 18px",boxShadow:"0 4px 20px rgba(0,0,0,0.4)",minWidth:"56px"
-                      }}>
-                        <span style={{color:"white",fontWeight:900,fontSize:"22px",letterSpacing:"0.05em",display:"block",textAlign:"center" as const}}>{String(dm.diagnosis_rank||"C")}</span>
+                    <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:"24px"}}>
+                      <div style={{flex:1}}>
+                        <h2 style={{color:"white",fontWeight:900,fontSize:"22px",marginBottom:"6px",letterSpacing:"-0.02em"}}>意思決定精度診断</h2>
+                        <p style={{color:"rgba(255,255,255,0.35)",fontSize:"12px",lineHeight:1.6}}>
+                          {Number(dm.diagnosis_total_score||0)>=80?"全指標が高水準で安定しています":Number(dm.diagnosis_total_score||0)>=65?"複数の指標に改善余地があります":Number(dm.diagnosis_total_score||0)>=50?"重点的な強化が必要な指標があります":"判断構造に根本的な課題があります"}
+                        </p>
                       </div>
-                      <p style={{color:"rgba(255,255,255,0.3)",fontSize:"9px",marginTop:"4px",letterSpacing:"0.12em",textAlign:"center" as const}}>RANK</p>
+                      <div style={{flexShrink:0,marginLeft:"20px",textAlign:"center" as const}}>
+                        <div style={{
+                          background:String(dm.diagnosis_rank||"C")==="S"?"linear-gradient(135deg,#fbbf24,#f59e0b,#ef4444)":String(dm.diagnosis_rank||"C").startsWith("A")?"linear-gradient(135deg,#818cf8,#6366f1,#4f46e5)":String(dm.diagnosis_rank||"C").startsWith("B")?"linear-gradient(135deg,#38bdf8,#0891b2,#0e7490)":"linear-gradient(135deg,#94a3b8,#64748b,#475569)",
+                          borderRadius:"16px",width:"64px",height:"64px",display:"flex",alignItems:"center",justifyContent:"center",
+                          boxShadow:String(dm.diagnosis_rank||"C")==="S"?"0 8px 32px rgba(251,191,36,0.4)":String(dm.diagnosis_rank||"C").startsWith("A")?"0 8px 32px rgba(99,102,241,0.4)":String(dm.diagnosis_rank||"C").startsWith("B")?"0 8px 32px rgba(8,145,178,0.4)":"0 8px 32px rgba(100,116,139,0.3)"
+                        }}>
+                          <span style={{color:"white",fontWeight:900,fontSize:"28px"}}>{String(dm.diagnosis_rank||"C")}</span>
+                        </div>
+                        <p style={{color:"rgba(255,255,255,0.25)",fontSize:"9px",marginTop:"6px",letterSpacing:"0.2em",fontWeight:700}}>RANK</p>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex justify-between items-center" style={{marginBottom:"6px"}}>
-                    <span style={{color:"rgba(255,255,255,0.4)",fontSize:"10px",fontWeight:600,letterSpacing:"0.12em"}}>TOTAL SCORE</span>
-                    <span style={{color:"white",fontWeight:900,fontSize:"20px"}}>{Number(dm.diagnosis_total_score||0).toFixed(1)}</span>
-                  </div>
-                  <div style={{background:"rgba(255,255,255,0.1)",borderRadius:"99px",height:"4px"}}>
-                    <div style={{
-                      width:`${Math.min(Number(dm.diagnosis_total_score||0),100)}%`,
-                      background:Number(dm.diagnosis_total_score||0)>=80?"linear-gradient(90deg,#059669,#10b981)":Number(dm.diagnosis_total_score||0)>=65?"linear-gradient(90deg,#0891b2,#06b6d4)":Number(dm.diagnosis_total_score||0)>=50?"linear-gradient(90deg,#d97706,#f59e0b)":"linear-gradient(90deg,#dc2626,#ef4444)",
-                      borderRadius:"99px",height:"4px",transition:"width 0.8s ease",
-                      boxShadow:Number(dm.diagnosis_total_score||0)>=80?"0 0 8px rgba(16,185,129,0.7)":Number(dm.diagnosis_total_score||0)>=65?"0 0 8px rgba(6,182,212,0.7)":Number(dm.diagnosis_total_score||0)>=50?"0 0 8px rgba(245,158,11,0.7)":"0 0 8px rgba(239,68,68,0.7)"
-                    }}/>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px"}}>
+                      <span style={{color:"rgba(255,255,255,0.3)",fontSize:"10px",fontWeight:700,letterSpacing:"0.15em"}}>TOTAL SCORE</span>
+                      <span style={{color:"white",fontWeight:900,fontSize:"24px"}}>{Number(dm.diagnosis_total_score||0).toFixed(1)}<span style={{color:"rgba(255,255,255,0.3)",fontSize:"13px"}}> / 100</span></span>
+                    </div>
+                    <div style={{background:"rgba(255,255,255,0.06)",borderRadius:"99px",height:"6px",overflow:"hidden"}}>
+                      <div style={{
+                        width:`${Math.min(Number(dm.diagnosis_total_score||0),100)}%`,
+                        background:Number(dm.diagnosis_total_score||0)>=80?"linear-gradient(90deg,#059669,#10b981,#34d399)":Number(dm.diagnosis_total_score||0)>=65?"linear-gradient(90deg,#0891b2,#06b6d4,#38bdf8)":Number(dm.diagnosis_total_score||0)>=50?"linear-gradient(90deg,#d97706,#f59e0b,#fbbf24)":"linear-gradient(90deg,#dc2626,#ef4444,#f87171)",
+                        borderRadius:"99px",height:"6px",transition:"width 1s ease",
+                        boxShadow:Number(dm.diagnosis_total_score||0)>=80?"0 0 12px rgba(52,211,153,0.6)":Number(dm.diagnosis_total_score||0)>=65?"0 0 12px rgba(56,189,248,0.6)":Number(dm.diagnosis_total_score||0)>=50?"0 0 12px rgba(251,191,36,0.6)":"0 0 12px rgba(248,113,113,0.6)"
+                      }}/>
+                    </div>
                   </div>
                 </div>
-                {/* 6指標 */}
-                <div style={{padding:"20px 24px"}} className="space-y-5">
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px"}}>
                   {([
-                    ["Q", dm.label_q||"意思決定精度", dm.decision_quality_score, "構造的思考による判断の質"],
-                    ["R", dm.label_r||"リスク耐性",   dm.risk_tolerance,          "リスクを定量化し許容する能力"],
-                    ["S", dm.label_s||"構造理解",     dm.structural_intelligence, "問題の本質と因果を把握する力"],
-                    ["V", dm.label_v||"判断速度",     dm.decision_velocity,       "適切なスピードで決断する能力"],
-                    ["P", dm.label_p||"予測精度",     dm.prediction_accuracy,     "継続的な利用から算出される精度"],
-                    ["E", dm.label_e||"実行一貫性",   dm.execution_consistency,   "判断と行動の整合性・一貫性"],
-                  ] as [string,string,unknown,string][]).map(([k,l,v,desc])=>{
+                    ["Q","意思決定精度",dm.decision_quality_score,"構造的思考による判断の質","構造キーワードを意識して問いを設計し直す","#818cf8","#6366f1"],
+                    ["R","リスク耐性",dm.risk_tolerance,"リスクを定量化し許容する能力","失敗条件・撤退基準を毎回明示する","#38bdf8","#0891b2"],
+                    ["S","構造理解",dm.structural_intelligence,"問題の本質と因果を把握する力","問題を「原因・構造・影響」の3層で分解する","#34d399","#059669"],
+                    ["V","判断速度",dm.decision_velocity,"適切なスピードで決断する能力","選択肢を2〜3に絞り、判断軸を事前に定義する","#fbbf24","#d97706"],
+                    ["P","予測精度",dm.prediction_accuracy,"継続的な利用から算出される精度","利用頻度を週3回以上に増やす","#f472b6","#db2777"],
+                    ["E","実行一貫性",dm.execution_consistency,"判断と行動の整合性・一貫性","前回の判断を振り返り、実行状況を報告してから次の相談をする","#a78bfa","#7c3aed"],
+                  ] as [string,string,unknown,string,string,string,string][]).map(([k,l,v,desc,tip,c1,c2])=>{
                     const val = Number(v);
-                    const gc = val>=80?"linear-gradient(90deg,#059669,#10b981)":val>=65?"linear-gradient(90deg,#0891b2,#06b6d4)":val>=50?"linear-gradient(90deg,#d97706,#f59e0b)":"linear-gradient(90deg,#dc2626,#ef4444)";
-                    const tc = val>=80?"#059669":val>=65?"#0891b2":val>=50?"#d97706":"#dc2626";
+                    const isLow = val < 65;
                     const lb = val>=80?"HIGH":val>=65?"MID":val>=50?"LOW":"CRITICAL";
+                    const lbBg = val>=80?"rgba(5,150,105,0.15)":val>=65?"rgba(8,145,178,0.15)":val>=50?"rgba(217,119,6,0.15)":"rgba(220,38,38,0.15)";
+                    const lbTc = val>=80?"#10b981":val>=65?"#06b6d4":val>=50?"#f59e0b":"#f87171";
                     return (
-                      <div key={k}>
-                        <div className="flex items-center justify-between" style={{marginBottom:"7px"}}>
-                          <div className="flex items-center gap-3">
-                            <div style={{width:"30px",height:"30px",borderRadius:"9px",background:`${tc}15`,border:`1.5px solid ${tc}35`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                              <span style={{color:tc,fontWeight:900,fontSize:"12px"}}>{k}</span>
-                            </div>
-                            <div>
-                              <p style={{color:C.textMain,fontWeight:700,fontSize:"13px",lineHeight:1.2}}>{String(l).replace(/^[A-Z] /,"")}</p>
-                              <p style={{color:C.textMuted,fontSize:"10px",marginTop:"1px"}}>{desc}</p>
-                            </div>
+                      <div key={k} style={{background:"linear-gradient(135deg,#0f0c29,#1a1535)",border:`1px solid ${c1}25`,borderRadius:"16px",padding:"16px",boxShadow:"0 4px 24px rgba(0,0,0,0.3)",position:"relative" as const,overflow:"hidden"}}>
+                        <div style={{position:"absolute" as const,top:0,right:0,width:"60px",height:"60px",background:`radial-gradient(circle at top right,${c1}20,transparent)`,pointerEvents:"none" as const}}/>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"12px"}}>
+                          <div style={{width:"36px",height:"36px",borderRadius:"10px",background:`linear-gradient(135deg,${c1}30,${c2}20)`,border:`1px solid ${c1}40`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                            <span style={{color:c1,fontWeight:900,fontSize:"14px"}}>{k}</span>
                           </div>
-                          <div style={{textAlign:"right" as const,flexShrink:0,marginLeft:"12px"}}>
-                            <p style={{color:tc,fontWeight:900,fontSize:"18px",lineHeight:1}}>{val.toFixed(0)}</p>
-                            <p style={{color:tc,fontSize:"9px",fontWeight:700,letterSpacing:"0.08em",marginTop:"1px"}}>{lb}</p>
+                          <div style={{textAlign:"right" as const}}>
+                            <p style={{color:"white",fontWeight:900,fontSize:"22px",lineHeight:1}}>{val.toFixed(0)}</p>
+                            <span style={{background:lbBg,color:lbTc,fontSize:"8px",fontWeight:800,padding:"2px 6px",borderRadius:"4px",letterSpacing:"0.1em"}}>{lb}</span>
                           </div>
                         </div>
-                        <div style={{background:"rgba(0,0,0,0.05)",borderRadius:"99px",height:"5px"}}>
-                          <div style={{width:`${Math.min(val,100)}%`,background:gc,borderRadius:"99px",height:"5px",transition:"width 0.7s ease",boxShadow:`0 0 6px ${tc}55`}}/>
+                        <p style={{color:"rgba(255,255,255,0.85)",fontWeight:700,fontSize:"12px",marginBottom:"3px"}}>{l}</p>
+                        <p style={{color:"rgba(255,255,255,0.3)",fontSize:"10px",marginBottom:"10px",lineHeight:1.4}}>{desc}</p>
+                        <div style={{background:"rgba(255,255,255,0.06)",borderRadius:"99px",height:"4px",marginBottom:"10px"}}>
+                          <div style={{width:`${Math.min(val,100)}%`,background:`linear-gradient(90deg,${c2},${c1})`,borderRadius:"99px",height:"4px",boxShadow:`0 0 8px ${c1}60`}}/>
+                        </div>
+                        <div style={{background:`${c1}12`,border:`1px solid ${c1}25`,borderRadius:"8px",padding:"8px 10px"}}>
+                          <p style={{color:"rgba(255,255,255,0.35)",fontSize:"8px",fontWeight:700,letterSpacing:"0.1em",marginBottom:"3px"}}>IMPROVEMENT</p>
+                          <p style={{color:c1,fontSize:"10px",lineHeight:1.5,fontWeight:600}}>{tip}</p>
                         </div>
                       </div>
                     );
                   })}
                 </div>
-                {/* フッター注記 */}
-                <div style={{borderTop:`1px solid ${C.border}`,margin:"0 24px",padding:"14px 0 18px"}}>
-                  <p style={{color:C.textMuted,fontSize:"11px",textAlign:"center" as const,lineHeight:1.7}}>
+                <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"14px",padding:"14px 20px"}}>
+                  <p style={{color:C.textMuted,fontSize:"11px",textAlign:"center" as const,lineHeight:1.8}}>
                     スコアは直近60件のチャット履歴から算出されます。<br/>
                     入力の質・継続頻度・語彙の構造性がすべての指標に影響します。
                   </p>
                 </div>
               </>
-            ) : <p className="text-center py-12" style={{color:C.textMuted}}>診断データがありません。チャットを重ねると計算されます。</p>}
+            ) : <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"20px",padding:"48px",textAlign:"center" as const}}><p style={{color:C.textMuted}}>診断データがありません。チャットを重ねると計算されます。</p></div>}
           </div>
         )}
-
-        {/* 固定概念 */}
         {tab==="fc" && (
           <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"24px",boxShadow:C.shadowMd}} className="p-6">
             <h2 className="text-lg font-black mb-4" style={{color:C.textMain}}>🧠 固定概念レポート</h2>
@@ -860,7 +867,10 @@ export default function MyPage() {
                     onDrop={async e=>{
                       e.preventDefault();e.stopPropagation();
                       if(knowledgeUploading) return;
-                      const files = Array.from(e.dataTransfer.files).slice(0, 60 - knowledgeFiles.length);
+                      const allFiles = Array.from(e.dataTransfer.files);
+              const existingNames = new Set(knowledgeFiles.map((kf:any)=>kf.title?.replace(/^会話要約: /,"")||kf.source_id||""));
+              const files = allFiles.filter((f:File)=>!existingNames.has(f.name)).slice(0, 99 - knowledgeFiles.length);
+              if(allFiles.length !== files.length){ alert(`重複ファイルをスキップしました（${allFiles.length - files.length}件）`); }
                       if(!files.length) return;
                       setKnowledgeUploading(true);
                       setKnowledgeProgress({current:0,total:files.length,name:"",log:[]});
@@ -878,7 +888,7 @@ export default function MyPage() {
                     }}
                   >
                     <span className="text-xs" style={{color:C.primary,fontWeight:600,display:"block",marginBottom:"4px"}}>{knowledgeUploading ? `⏳ ${knowledgeProgress.current}/${knowledgeProgress.total} 処理中: ${knowledgeProgress.name}` : "📎 ファイルをアップロードする"}</span>
-                    <span className="text-xs" style={{color:C.textMuted}}>クリックまたはドラッグ＆ドロップ　{knowledgeFiles.length}/60件</span>
+                    <span className="text-xs" style={{color:C.textMuted}}>クリックまたはドラッグ＆ドロップ　{knowledgeFiles.length}/99件</span>
                     {knowledgeProgress.log.length > 0 && (
                       <div style={{marginTop:"8px",textAlign:"left",maxHeight:"120px",overflowY:"auto",background:"rgba(0,0,0,0.04)",borderRadius:"6px",padding:"6px 8px"}}>
                         {knowledgeProgress.log.map((l,i)=>(
@@ -888,7 +898,10 @@ export default function MyPage() {
                     )}
                     <input type="file" accept=".txt,.md,.csv,.xlsx,.xls,.odt" style={{display:"none"}} multiple
                       onChange={async e=>{
-                        const files = Array.from(e.target.files||[]).slice(0, 60 - knowledgeFiles.length);
+                        const allFiles = Array.from(e.target.files||[]);
+                        const existingNames = new Set(knowledgeFiles.map((kf:any)=>kf.title?.replace(/^会話要約: /,"")||kf.source_id||""));
+                        const files = allFiles.filter((f:File)=>!existingNames.has(f.name)).slice(0, 99 - knowledgeFiles.length);
+                        if(allFiles.length !== files.length){ alert(`重複ファイルをスキップしました（${allFiles.length - files.length}件）`); }
                         if(!files.length) return;
                         setKnowledgeUploading(true);
                         setKnowledgeProgress({current:0,total:files.length,name:"",log:[]});
@@ -923,4 +936,9 @@ export default function MyPage() {
       </div>
     </div>
   );
+}
+
+import { Suspense } from "react";
+export default function MyPage() {
+  return <Suspense fallback={null}><MyPageInner /></Suspense>;
 }

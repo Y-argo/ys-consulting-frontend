@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { generateSlides, generateEventPlan } from "@/lib/api";
 
 const C = {
@@ -330,6 +330,20 @@ function EventPlanTool() {
   const [error, setError] = useState("");
   const [data, setData] = useState<EventPlanData|null>(null);
   const [showAll, setShowAll] = useState(false);
+  const [epHistory, setEpHistory] = useState<any[]>([]);
+  const epBase = process.env.NEXT_PUBLIC_API_URL || "";
+  const epTok = () => typeof window!=="undefined" ? localStorage.getItem("ascend_token")||"" : "";
+  useEffect(()=>{ epFetchHist(); },[]);
+  async function epFetchHist() {
+    try { const r=await fetch(`${epBase}/api/user/event_plan_history_list`,{headers:{Authorization:`Bearer ${epTok()}`}}); const j=await r.json(); if(j.ok) setEpHistory((j.items||[]).slice(0,20)); } catch {}
+  }
+  async function epLoadHist(id:string) {
+    try { const r=await fetch(`${epBase}/api/user/event_plan_history_get/${id}`,{headers:{Authorization:`Bearer ${epTok()}`}}); const j=await r.json(); if(j.ok&&j.item?.data){setData(j.item.data);window.scrollTo({top:0,behavior:"smooth"});} } catch {}
+  }
+  async function epDelHist(id:string) {
+    if(!confirm("この履歴を削除しますか？"))return;
+    try { await fetch(`${epBase}/api/user/event_plan_history_delete/${id}`,{method:"DELETE",headers:{Authorization:`Bearer ${epTok()}`}}); epFetchHist(); } catch {}
+  }
   const setField = (key:string, val:string) => setForm(f=>({...f,[key]:val}));
   const visibleFields = showAll ? EVENT_FIELDS : EVENT_FIELDS.slice(0,4);
 
@@ -364,6 +378,7 @@ function EventPlanTool() {
     setLoading(false);
     if (!res.ok || !res.data) { setError("生成に失敗しました。再試行してください。"); return; }
     setData(res.data);
+    epFetchHist();
   }
 
   function handlePrint() {
@@ -371,8 +386,7 @@ function EventPlanTool() {
     const html = buildEventPlanHTML(data);
     const w = window.open("", "_blank");
     if (!w) return;
-    w.document.write(html); w.document.close(); w.focus();
-    setTimeout(() => w.print(), 600);
+    w.document.write(html); w.document.close();
   }
 
   function handleSaveHTML() {
@@ -394,6 +408,24 @@ function EventPlanTool() {
         <p style={{color:"rgba(255,255,255,0.45)",fontSize:"12px",lineHeight:1.6}}>目的・構成・予算・KPIを入力 → プロ品質の企画書を即時生成</p>
       </div>
 
+      {epHistory.length > 0 && (
+        <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",padding:"16px"}}>
+          <p style={{color:C.textMain,fontWeight:800,fontSize:"13px",marginBottom:"12px"}}>📂 生成履歴</p>
+          <div className="space-y-2">
+            {epHistory.map((h:any)=>(
+              <div key={h.doc_id} style={{display:"flex",alignItems:"center",gap:"8px",padding:"10px 12px",background:C.bg,border:`1px solid ${C.border}`,borderRadius:"10px"}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <p style={{color:C.textMain,fontWeight:700,fontSize:"12px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.event_name||h.title||"無題"}</p>
+                  <p style={{color:C.textMuted,fontSize:"10px"}}>{h.created_at?.slice(0,10)||""}</p>
+                </div>
+                <button onClick={()=>epLoadHist(h.doc_id)} style={{background:"linear-gradient(135deg,#0891b2,#0e7490)",color:"white",border:"none",borderRadius:"8px",padding:"5px 10px",fontSize:"11px",fontWeight:700,cursor:"pointer",flexShrink:0}}>読込</button>
+                <button onClick={()=>epDelHist(h.doc_id)} style={{background:"rgba(239,68,68,0.1)",color:"#ef4444",border:"1px solid rgba(239,68,68,0.2)",borderRadius:"8px",padding:"5px 8px",fontSize:"11px",cursor:"pointer",flexShrink:0}}>削除</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",padding:"20px"}} className="space-y-4">
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <p style={{color:C.textMain,fontWeight:800,fontSize:"14px"}}>📝 企画情報の入力</p>
@@ -401,12 +433,20 @@ function EventPlanTool() {
         </div>
         {visibleFields.map(f=>(
           <div key={f.key}>
-            <div style={{display:"flex",alignItems:"baseline",gap:"6px",marginBottom:"4px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:"6px",marginBottom:"4px"}}>
               <p style={{color:C.textMain,fontSize:"12px",fontWeight:700}}>
                 {f.label}
                 {f.required&&<span style={{color:"#ef4444",marginLeft:"4px"}}>*必須</span>}
               </p>
-              <p style={{color:C.textMuted,fontSize:"10px"}}>{f.desc}</p>
+              {f.desc&&(
+                <span style={{position:"relative",display:"inline-block"}}
+                  onMouseEnter={e=>{const t=e.currentTarget.querySelector('.tt') as HTMLElement;if(t)t.style.display="block";}}
+                  onMouseLeave={e=>{const t=e.currentTarget.querySelector('.tt') as HTMLElement;if(t)t.style.display="none";}}
+                  onClick={e=>{const t=e.currentTarget.querySelector('.tt') as HTMLElement;if(t)t.style.display=t.style.display==="block"?"none":"block";}}>
+                  <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:"16px",height:"16px",borderRadius:"50%",background:"rgba(79,70,229,0.12)",color:"#4f46e5",fontSize:"10px",fontWeight:700,cursor:"pointer",userSelect:"none"}}>?</span>
+                  <span className="tt" style={{display:"none",position:"absolute",left:"20px",top:"-4px",background:"#1e1b4b",color:"white",fontSize:"11px",padding:"6px 10px",borderRadius:"8px",whiteSpace:"normal" as const,zIndex:100,boxShadow:"0 4px 16px rgba(0,0,0,0.3)",minWidth:"180px",maxWidth:"280px",lineHeight:1.6}}>{f.desc}</span>
+                </span>
+              )}
             </div>
             <textarea value={form[f.key]||""} onChange={e=>setField(f.key,e.target.value)}
               placeholder={f.placeholder} rows={2}
@@ -546,6 +586,7 @@ function buildEventPlanHTML(data: EventPlanData): string {
     .tbl th,.tbl td{border:1px solid #e5e7eb;padding:7px 10px;text-align:left;}
     .tbl th{font-weight:700;}
     .container{max-width:800px;margin:0 auto;padding:24px;}
+    @page{size:A4;margin:15mm 20mm;}
     @media print{
       .cover{background:white !important;color:#111827 !important;border:2px solid #111827;}
       .cover-label{color:#6b7280 !important;}
@@ -553,7 +594,7 @@ function buildEventPlanHTML(data: EventPlanData): string {
       .cover-sub{color:#374151 !important;}
       .exec-summary{background:#f8f9fc !important;border:1px solid #e5e7eb !important;}
       .exec-label{color:#6b7280 !important;}
-      .exec-text{color:#374151 !important;}body{background:white;}.cover{page-break-after:always;}}
+      .exec-text{color:#374151 !important;}body{background:white;}.cover{page-break-after:always;}.section{page-break-inside:avoid;}}
   </style></head><body>
   <div class="cover">
     <div class="cover-label">ASCEND CONSULTING · Ys Consulting Office</div>
@@ -563,6 +604,7 @@ function buildEventPlanHTML(data: EventPlanData): string {
   </div>
   <div class="container">${sections}
     ${data.appendix_notes?`<div class="section"><div class="sec-body"><p style="font-weight:700;margin-bottom:8px;color:#6b7280">📎 補足・参考資料</p><p class="content">${data.appendix_notes}</p></div></div>`:""}
+  <script>window.addEventListener('load',function(){window.focus();window.print();});</script>
   </div></body></html>`;
 }
 
@@ -578,6 +620,20 @@ export default function PresentationTool() {
   const [activeSlide, setActiveSlide] = useState(0);
   const [viewMode, setViewMode] = useState<"list"|"preview"|"logic">("list");
   const [showAllFields, setShowAllFields] = useState(false);
+  const [psHistory, setPsHistory] = useState<any[]>([]);
+  const psBase = process.env.NEXT_PUBLIC_API_URL || "";
+  const psTok = () => typeof window!=="undefined" ? localStorage.getItem("ascend_token")||"" : "";
+  useEffect(()=>{ psFetchHist(); },[]);
+  async function psFetchHist() {
+    try { const r=await fetch(`${psBase}/api/user/presentation_history_list`,{headers:{Authorization:`Bearer ${psTok()}`}}); const j=await r.json(); if(j.ok) setPsHistory((j.items||[]).slice(0,20)); } catch {}
+  }
+  async function psLoadHist(id:string) {
+    try { const r=await fetch(`${psBase}/api/user/presentation_history_get/${id}`,{headers:{Authorization:`Bearer ${psTok()}`}}); const j=await r.json(); if(j.ok&&j.item?.data){setData(j.item.data);setActiveSlide(0);setViewMode("list");window.scrollTo({top:0,behavior:"smooth"});} } catch {}
+  }
+  async function psDelHist(id:string) {
+    if(!confirm("この履歴を削除しますか？"))return;
+    try { await fetch(`${psBase}/api/user/presentation_history_delete/${id}`,{method:"DELETE",headers:{Authorization:`Bearer ${psTok()}`}}); psFetchHist(); } catch {}
+  }
 
   const setField = (key:string, val:string) => setForm(f=>({...f,[key]:val}));
 
@@ -614,6 +670,7 @@ export default function PresentationTool() {
       setData(json2.data);
       setActiveSlide(0);
       setViewMode("list");
+      setTimeout(() => psFetchHist(), 800);
     } catch(e) {
       setError("通信エラーが発生しました。");
     }
@@ -627,8 +684,6 @@ export default function PresentationTool() {
     if (!w) return;
     w.document.write(html);
     w.document.close();
-    w.focus();
-    setTimeout(() => w.print(), 600);
   }
 
   function handleSaveHTML() {
@@ -697,12 +752,20 @@ export default function PresentationTool() {
 
         {visibleFields.map(f=>(
           <div key={f.key}>
-            <div style={{display:"flex",alignItems:"baseline",gap:"6px",marginBottom:"4px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:"6px",marginBottom:"4px"}}>
               <p style={{color:C.textMain,fontSize:"12px",fontWeight:700}}>
                 {f.label}
                 {f.required&&<span style={{color:"#ef4444",marginLeft:"4px"}}>*必須</span>}
               </p>
-              <p style={{color:C.textMuted,fontSize:"10px"}}>{f.desc}</p>
+              {f.desc&&(
+                <span style={{position:"relative",display:"inline-block"}}
+                  onMouseEnter={e=>{const t=e.currentTarget.querySelector('.tt') as HTMLElement;if(t)t.style.display="block";}}
+                  onMouseLeave={e=>{const t=e.currentTarget.querySelector('.tt') as HTMLElement;if(t)t.style.display="none";}}
+                  onClick={e=>{const t=e.currentTarget.querySelector('.tt') as HTMLElement;if(t)t.style.display=t.style.display==="block"?"none":"block";}}>
+                  <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:"16px",height:"16px",borderRadius:"50%",background:"rgba(79,70,229,0.12)",color:"#4f46e5",fontSize:"10px",fontWeight:700,cursor:"pointer",userSelect:"none"}}>?</span>
+                  <span className="tt" style={{display:"none",position:"absolute",left:"20px",top:"-4px",background:"#1e1b4b",color:"white",fontSize:"11px",padding:"6px 10px",borderRadius:"8px",whiteSpace:"normal" as const,zIndex:100,boxShadow:"0 4px 16px rgba(0,0,0,0.3)",minWidth:"180px",maxWidth:"280px",lineHeight:1.6}}>{f.desc}</span>
+                </span>
+              )}
             </div>
             <textarea
               value={form[f.key]||""}
@@ -760,6 +823,24 @@ export default function PresentationTool() {
           </span>
         </button>
       </div>
+
+      {!data && psHistory.length > 0 && (
+        <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",padding:"16px"}}>
+          <p style={{color:C.textMain,fontWeight:800,fontSize:"13px",marginBottom:"12px"}}>📂 生成履歴</p>
+          <div className="space-y-2">
+            {psHistory.map((h:any)=>(
+              <div key={h.doc_id} style={{display:"flex",alignItems:"center",gap:"8px",padding:"10px 12px",background:C.bg,border:`1px solid ${C.border}`,borderRadius:"10px"}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <p style={{color:C.textMain,fontWeight:700,fontSize:"12px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.title||"無題"}</p>
+                  <p style={{color:C.textMuted,fontSize:"10px"}}>{h.created_at?.slice(0,10)||""} · {h.slide_count||0}枚</p>
+                </div>
+                <button onClick={()=>psLoadHist(h.doc_id)} style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,color:"white",border:"none",borderRadius:"8px",padding:"5px 10px",fontSize:"11px",fontWeight:700,cursor:"pointer",flexShrink:0}}>読込</button>
+                <button onClick={()=>psDelHist(h.doc_id)} style={{background:"rgba(239,68,68,0.1)",color:"#ef4444",border:"1px solid rgba(239,68,68,0.2)",borderRadius:"8px",padding:"5px 8px",fontSize:"11px",cursor:"pointer",flexShrink:0}}>削除</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 生成結果 */}
       {data && (
@@ -972,7 +1053,7 @@ function buildPrintHTML(data: PresentationData): string {
     const color = slideColors[s.type]||"#4f46e5";
     const tl = typeLabel[s.type]||s.type;
     const bullets = (s.bullets||[]).map(b=>`<div class="bullet"><span class="arrow" style="color:${color}">▶</span><span>${b}</span></div>`).join("");
-    const breakClass = "";
+    const breakClass = idx < data.slides.length - 1 ? " slide-break" : "";
     return `
     <div class="slide${breakClass}">
       <div class="slide-header">
@@ -1020,6 +1101,7 @@ function buildPrintHTML(data: PresentationData): string {
     .data-label{margin-top:10px;background:#f8f9fc;border:1px solid #e5e7eb;border-radius:5px;padding:5px 10px;font-size:10px;color:#6b7280;font-weight:600;}
     .note{margin-top:8px;font-size:10px;color:#9ca3af;font-style:italic;}
     .slide-footer{border-top:1px solid #e5e7eb;padding-top:8px;margin-top:14px;display:flex;justify-content:space-between;font-size:8px;font-weight:600;letter-spacing:0.1em;color:#d1d5db;}
+    @page{size:A4;margin:15mm 20mm;}
     @media print{
       .cover{background:white !important;color:#111827 !important;border:2px solid #111827;}
       .cover-label{color:#6b7280 !important;}
@@ -1030,7 +1112,7 @@ function buildPrintHTML(data: PresentationData): string {
       .exec-text{color:#374151 !important;}
       body{background:white;}
       .cover{page-break-after:always;}
-      .slide{border-bottom:1px solid #e5e7eb;}
+      .slide{border-bottom:1px solid #e5e7eb;page-break-inside:avoid;}
       .slide-break{page-break-after:always;}
     }
   </style></head><body>
@@ -1046,5 +1128,6 @@ function buildPrintHTML(data: PresentationData): string {
   ${logicPage}
   ${slides}
   ${data.appendix_notes?`<div class="slide"><h2 class="slide-title" style="margin-bottom:16px">📎 補足・出典・前提条件</h2><p style="font-size:13px;color:#6b7280;line-height:1.8">${data.appendix_notes}</p></div>`:""}
+  <script>window.addEventListener('load',function(){window.focus();window.print();});</script>
   </body></html>`;
 }

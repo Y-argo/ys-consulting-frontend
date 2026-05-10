@@ -16,7 +16,7 @@ import {
 } from "@/lib/api";
 import AdBanner from "@/components/AdBanner";
 
-type Modal = "none"|"rankup"|"manual"|"guide"|"about"|"fc"|"logs"|"mypage"|"rename"|"cookie";
+type Modal = "none"|"rankup"|"manual"|"guide"|"fc"|"logs"|"mypage"|"rename"|"cookie";
 
 interface MsgExt extends Message {
   id: string;
@@ -86,6 +86,7 @@ export default function ChatPage() {
   const [attachment, setAttachment] = useState<AttachmentResult|null>(null);
   const [intentLabel, setIntentLabel] = useState<string|null>(null);
   const [attachLoading, setAttachLoading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const [feedbackToast, setFeedbackToast] = useState<string>("");
   const [loadingStep, setLoadingStep] = useState(0);
   const [loadingLabel, setLoadingLabel] = useState("");
@@ -157,31 +158,6 @@ export default function ChatPage() {
     getChatExamples().then(setChatExamples);
     getPurposeModes().then(setPurposeModesData);
 
-    // セッションタイムアウト監視
-    let _timeoutMin = 60;
-    const _lastAct = {ts: Date.now()};
-    const _updateAct = () => { _lastAct.ts = Date.now(); };
-    window.addEventListener("mousemove", _updateAct);
-    window.addEventListener("keydown", _updateAct);
-    window.addEventListener("click", _updateAct);
-    let _timer: ReturnType<typeof setInterval> | null = null;
-    const _startTimer = (min: number) => {
-      if (_timer) clearInterval(_timer);
-      _timer = setInterval(() => {
-        if (Date.now() - _lastAct.ts > min * 60 * 1000) {
-          logout();
-          router.push("/");
-        }
-      }, 30000);
-    };
-    fetch("/api/user/session_timeout", {headers:{"Authorization":`Bearer ${localStorage.getItem("ascend_token")||""}`}})
-      .then(r=>r.json()).then(d=>{ _timeoutMin = d.session_timeout_minutes||60; _startTimer(_timeoutMin); }).catch(()=>{ _startTimer(_timeoutMin); });
-    return () => {
-      if (_timer) clearInterval(_timer);
-      window.removeEventListener("mousemove", _updateAct);
-      window.removeEventListener("keydown", _updateAct);
-      window.removeEventListener("click", _updateAct);
-    };
   }, []);
 
   const scrollToBottom = (smooth: boolean = true) => {
@@ -364,6 +340,16 @@ export default function ChatPage() {
     finally { setAttachLoading(false); e.target.value=""; }
   }
 
+  async function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    setAttachLoading(true);
+    try { const r = await uploadAttachment(file, chatId); setAttachment(r); }
+    catch { alert("ファイルの読み込みに失敗しました"); }
+    finally { setAttachLoading(false); }
+  }
   async function handleNewSession() {
     if (isCreatingSession) return;
     setIsCreatingSession(true);
@@ -422,7 +408,7 @@ export default function ChatPage() {
   const fcPct = Math.min((fcCount/fcThreshold)*100,100);
   const modalTitles: Record<Modal,string> = {
     none:"",rankup:"🏆 ランクアップのコツ",manual:"📖 データ戦略完全マニュアル",
-    guide:"📝 使い方ガイド",about:"ℹ️ ASCENDとは",fc:"🧠 固定概念レポート",
+    guide:"📝 使い方ガイド",fc:"🧠 固定概念レポート",
     logs:"📋 利用履歴",mypage:"👤 マイページ",rename:"✏️ チャット名変更",cookie:"🍪 Cookie設定",
   };
 
@@ -474,6 +460,12 @@ export default function ChatPage() {
         {leftOpen && (
           <aside style={{background:C.sidebar, borderRight:`1px solid ${C.border}`, width:"220px", display:"flex", flexDirection:"column", overflowY:"auto", scrollbarWidth:"none", msOverflowStyle:"none"}} className="flex-shrink-0 [&::-webkit-scrollbar]:hidden">
             <div className="p-3 space-y-2">
+
+              {/* ASCENDとは ボタン（最上部） */}
+              <button onClick={()=>router.push("/ascend-about")} style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,boxShadow:C.shadowPrimary,borderRadius:"14px",padding:"10px 12px",width:"100%",textAlign:"left",color:"white",fontSize:"12px",fontWeight:800,display:"flex",alignItems:"center",gap:"8px",border:"none",cursor:"pointer"}} className="hover:opacity-90 transition-all">
+                <span style={{fontSize:"15px"}}>ℹ️</span>
+                <span>ASCENDとは</span>
+              </button>
 
               {/* ランクスコア プレミアム */}
               {stats && (() => {
@@ -692,7 +684,7 @@ export default function ChatPage() {
                   <p className="text-xs mt-1" style={{color:C.textMuted}}>何でも相談してください</p>
                 </div>
                 <div className="grid grid-cols-2 gap-2 max-w-lg w-full">
-                  {([{label:"📖 マニュアル",action:()=>openModal("manual")},{label:"📝 ガイド",action:()=>openModal("guide")},{label:"🏆 ランクアップ",action:()=>openModal("rankup")},{label:"ℹ️ ASCENDとは",action:()=>openModal("about")},{label:"🔬 診断・分析",action:()=>router.push("/diagnosis")},{label:"⚙️ 設定",action:()=>router.push("/mypage")}]).map(item=>(
+                  {([{label:"📖 マニュアル",action:()=>openModal("manual")},{label:"📝 ガイド",action:()=>openModal("guide")},{label:"🏆 ランクアップ",action:()=>openModal("rankup")},{label:"ℹ️ ASCENDとは",action:()=>router.push("/ascend-about")},{label:"🔬 診断・分析",action:()=>router.push("/diagnosis")},{label:"⚙️ 設定",action:()=>router.push("/mypage")}]).map(item=>(
                     <button key={item.label} onClick={item.action}
                       style={{background:C.card, border:`1px solid ${C.border}`, boxShadow:C.shadow, borderRadius:"12px"}}
                       className="text-xs text-left p-3 hover:border-indigo-300 hover:shadow-md transition-all">
@@ -737,8 +729,8 @@ export default function ChatPage() {
                             {m.content.replace(/\n\n\[添付:[\s\S]*$/,"").replace(/\n\n【添付ファイル:[\s\S]*$/,"")}
                           </div>
                           <div className="flex justify-end mt-1 gap-1 opacity-100 transition-opacity">
-                            <button onClick={()=>{setEditingId(m.id);setEditVal(m.content.replace(/\n\n\[添付:[\s\S]*$/,"").replace(/\n\n【添付ファイル:[\s\S]*$/,""));}}
-                              className="text-xs px-2 py-0.5 rounded transition-colors" style={{color:C.textMuted}}>✏️ 編集</button>
+                            <button onClick={()=>{setEditingId(m.id);setEditVal(m.content.replace(/\n\n\[添付:[\s\S]*$/,"").replace(/\n\n【添付ファイル:[\s\S]*$/,""));}} className="text-xs px-2 py-0.5 rounded transition-colors" style={{color:C.textMuted}}>✏️ 編集</button>
+                            <button onClick={()=>{const t=m.content.replace(/\n\n\[添付:[\s\S]*$/,"").replace(/\n\n【添付ファイル:[\s\S]*$/,"");navigator.clipboard.writeText(t).then(()=>{setFeedbackToast("コピーしました");setTimeout(()=>setFeedbackToast(""),1500);});}} className="text-xs px-2 py-0.5 rounded transition-colors" style={{color:C.textMuted}} title="コピー">📋 コピー</button>
                           </div>
                         </>
                       )}
@@ -1275,7 +1267,7 @@ export default function ChatPage() {
             )}
             <form onSubmit={handleSend} className="flex gap-2 items-end">
               <input ref={fileRef} type="file" onChange={handleFileChange} className="hidden" accept=".txt,.md,.csv,.pdf,.xlsx,.xls,.json,.py,.js,.ts,.png,.jpg,.jpeg,.webp"/>
-              <div style={{background:"rgba(0,0,0,0.02)",border:`1px solid ${C.border}`,borderRadius:"16px",display:"flex",alignItems:"flex-end",gap:"4px",padding:"6px 8px 6px 8px"}} className="flex-1 focus-within:border-indigo-400 transition-all">
+              <div style={{background:isDragging?"rgba(79,70,229,0.06)":"rgba(0,0,0,0.02)",border:isDragging?`2px dashed ${C.primary}`:`1px solid ${C.border}`,borderRadius:"16px",display:"flex",alignItems:"flex-end",gap:"4px",padding:"6px 8px 6px 8px",transition:"all 0.2s"}} className="flex-1 focus-within:border-indigo-400 transition-all" onDrop={handleDrop} onDragOver={e=>{e.preventDefault();setIsDragging(true);}} onDragLeave={()=>setIsDragging(false)}>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gridTemplateRows:"1fr 1fr",gap:"2px",flexShrink:0,alignSelf:"center",marginRight:"4px"}}>
                   <button type="button" onClick={()=>{setChatMode("talk");localStorage.setItem("ascend_chat_mode","talk");}}
                     style={{borderRadius:"6px",fontSize:"13px",padding:"3px 6px",transition:"all 0.2s",border:"none",cursor:"pointer",lineHeight:1,
@@ -1339,29 +1331,6 @@ export default function ChatPage() {
                     className="text-sm px-4 py-3 focus:outline-none focus:border-indigo-400 transition-colors placeholder-gray-400"
                   />
                   <button onClick={handleRename} style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`}} className="w-full text-white font-bold rounded-2xl py-3 text-sm hover:opacity-90">変更する</button>
-                </div>
-              )}
-              {modal==="about" && (
-                <div className="space-y-4">
-                  <p style={{fontWeight:900,fontSize:"22px",textAlign:"center",color:"#6366f1",letterSpacing:"6px",marginBottom:"4px"}}>ASCEND</p>
-                  <div style={{background:"rgba(99,102,241,0.08)",border:"1px solid rgba(99,102,241,0.25)",borderRadius:"16px",padding:"20px"}}>
-                    <p className="text-sm font-bold mb-3" style={{color:"#6366f1"}}>■ 名称の意味</p>
-                    <div className="space-y-3 text-sm">
-                      <p style={{color:"#111827"}}><span style={{color:"#6366f1",fontWeight:900}}>A</span> — Architectural Analysis（構造解剖）</p>
-                      <p style={{color:"#111827"}}><span style={{color:"#6366f1",fontWeight:900}}>S</span> — Scoring &amp; Scale（階級スコア）</p>
-                      <p style={{color:"#111827"}}><span style={{color:"#6366f1",fontWeight:900}}>C</span> — Case-driven RAG（事例駆動検索）</p>
-                      <p style={{color:"#111827"}}><span style={{color:"#6366f1",fontWeight:900}}>E</span> — Executor Strategy（戦術執行）</p>
-                      <p style={{color:"#111827"}}><span style={{color:"#6366f1",fontWeight:900}}>N</span> — Nurturing / Mentor（育成・導師）</p>
-                      <p style={{color:"#111827"}}><span style={{color:"#6366f1",fontWeight:900}}>D</span> — Dynamic Routing &amp; Diagnosis（動的診断）</p>
-                    </div>
-                  </div>
-                  {stats?.tenant_id && (
-                    <div style={{background:"rgba(99,102,241,0.06)",border:"1px solid rgba(99,102,241,0.15)",borderRadius:"12px",padding:"12px 16px",textAlign:"center"}}>
-                      <p className="text-xs" style={{color:"#6b7280",marginBottom:"2px"}}>登録業種</p>
-                      <p className="text-sm font-bold" style={{color:"#111827"}}>{stats.tenant_id}</p>
-                    </div>
-                  )}
-                  <p className="text-xs text-center" style={{color:"#6b7280"}}>戦略・数値・構造・リスク——あらゆる経営判断に即応するAIコンサルティングエンジン</p>
                 </div>
               )}
               {modal==="logs" && (

@@ -190,13 +190,23 @@ export async function getMyFeatures(): Promise<FeatureFlags> {
   if (!res.ok) {
     // 失敗時はデフォルト（core のみ許可）を返す
     return {
-      image_generation: true,
-      personal_consulting: true,
-      current_issue_diagnosis: true,
-      decision_metrics: true,
-      fixed_concept_report: true,
+      image_generation: false,
+      personal_consulting: false,
+      current_issue_diagnosis: false,
+      decision_metrics: false,
+      fixed_concept_report: false,
       ascend_ultra: false,
       ascend_apex: false,
+      diag_structure: false,
+      diag_issue: false,
+      diag_comparison: false,
+      diag_contradiction: false,
+      diag_execution: false,
+      diag_investment: false,
+      diag_graph: false,
+      diag_file: false,
+      diag_presentation: false,
+      diag_future: false,
     };
   }
   const data = await res.json();

@@ -14,7 +14,7 @@ function authHeaders(): HeadersInit {
   return token ? { "Content-Type": "application/json", Authorization: `Bearer ${token}` } : { "Content-Type": "application/json" };
 }
 
-type TabId = "diagnosis"|"structure"|"issue"|"comparison"|"contradiction"|"execution"|"investment"|"graph"|"file"|"presentation";
+type TabId = "diagnosis"|"structure"|"issue"|"comparison"|"contradiction"|"execution"|"investment"|"graph"|"file"|"presentation"|"future"|"profile";
 
 const C = {
   bg:"#f8f9fc", card:"#ffffff", primary:"#4f46e5", primary2:"#7c3aed",
@@ -56,9 +56,23 @@ function DiagnosisPageInner() {
   const [stats, setStats] = useState<UserStats|null>(null);
   const [chatMessages, setChatMessages] = useState<{role:string;content:string}[]>([]);
   const [features, setFeatures] = useState<Record<string,boolean>>({});
+  const [featuresLoaded, setFeaturesLoaded] = useState(false);
+  const [profileInput, setProfileInput] = useState<Record<string,string>>({});
+  const [profileResult, setProfileResult] = useState<any>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileHistory, setProfileHistory] = useState<{doc_id:string;target_name:string;created_at:string;summary:string;result?:any}[]>([]);
+  const [profileError, setProfileError] = useState("");
+  const [profileQuestions, setProfileQuestions] = useState<Record<string,string[]>|null>(null);
+  const [profileQuestionsLoading, setProfileQuestionsLoading] = useState(false);
+  const [profileAnswer, setProfileAnswer] = useState("");
+  const [profileAnswerLoading, setProfileAnswerLoading] = useState(false);
+  const [profileCustomQuestion, setProfileCustomQuestion] = useState("");
+  const [profileAnsweredQuestion, setProfileAnsweredQuestion] = useState("");
 
   useEffect(() => {
     setMounted(true);
+    if (!getStoredUser()) { router.push("/"); return; }
+    getMyFeatures().then(f=>{setFeatures(f as Record<string,boolean>);setFeaturesLoaded(true);}).catch(()=>{setFeatures({diag_structure:false,diag_issue:false,diag_comparison:false,diag_contradiction:false,diag_execution:false,diag_investment:false,diag_graph:false,diag_file:false,diag_presentation:false,diag_future:false,diag_profile:false});setFeaturesLoaded(true);});
     const urlTab = searchParams.get("tab") as TabId;
     const urlStock = searchParams.get("stock");
     if (urlStock) setStockSearch(decodeURIComponent(urlStock));
@@ -82,12 +96,10 @@ function DiagnosisPageInner() {
     }
     const savedTab = localStorage.getItem("diag_tab") as TabId;
     if (savedTab) setTab(savedTab);
-    if (!getStoredUser()) { router.push("/"); return; }
     fetchHistory();
     fetchFrameworks();
     fetchSignals();
     getUserStats().then(setStats);
-    getMyFeatures().then(f=>setFeatures(f as Record<string,boolean>));
     fetch(`${API_BASE}/api/chat/history/main`, { headers: authHeaders() })
       .then(r=>r.json()).then(d=>setChatMessages(d.messages||[])).catch(()=>{});
   }, []);
@@ -277,7 +289,159 @@ function DiagnosisPageInner() {
   }
 
   const [activeAnalysisType, setActiveAnalysisType] = useState<string>("");
-  const allTabs: {id:TabId;label:string;flag?:string}[] = [
+  const [futureInput, setFutureInput] = useState("");
+  const [futureResult, setFutureResult] = useState<any>(null);
+  const [futureLoading, setFutureLoading] = useState(false);
+  const [futureError, setFutureError] = useState("");
+  const [futureHistory, setFutureHistory] = useState<any[]>([]);
+  const loadProfileHistory = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/diagnosis/profile_list`, {headers:authHeaders()});
+      const data = await res.json();
+      if(data.profiles) setProfileHistory(data.profiles);
+    } catch(e){}
+  };
+  const loadFutureHistory = async () => {
+    const token = localStorage.getItem("ascend_token") || "";
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+    try {
+      const r = await fetch(`${API_BASE}/api/diagnosis/future_simulation_list`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      const d = await r.json();
+      if (d.items) setFutureHistory(d.items);
+    } catch(e) {}
+  };
+  const deleteFutureSimulation = async (docId: string) => {
+    if (!confirm("このシミュレーション履歴を削除しますか？")) return;
+    const token = localStorage.getItem("ascend_token") || "";
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+    try {
+      await fetch(`${API_BASE}/api/diagnosis/future_simulation_delete/${docId}`, {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      setFutureHistory(prev => prev.filter(h => h.doc_id !== docId));
+    } catch(e) {}
+  };
+  const deleteProfile = async (doc_id:string) => {
+    if(!confirm("このプロファイルを削除しますか？")) return;
+    try {
+      await fetch(`${API_BASE}/api/diagnosis/profile_delete/${doc_id}`,{method:"DELETE",headers:authHeaders()});
+      loadProfileHistory();
+    } catch(e){}
+  };
+  const handleProfileGenerate = async () => {
+    setProfileError("");
+    const _vals = [profileInput.frequent_words,profileInput.conversation_traits,profileInput.judgment_criteria,profileInput.stress_reaction,profileInput.behavioral_patterns,profileInput.interpersonal_needs,profileInput.disliked_types,profileInput.trust_conditions,profileInput.work_attitude,profileInput.preferred_environment,profileInput.breakdown_conditions,profileInput.core_values,profileInput.strong_reactions,profileInput.contradictions,profileInput.obsessions,profileInput.anger_points,profileInput.justification_patterns,profileInput.ignored_topics,profileInput.responsibility_shift];
+    if(!_vals.some(v=>(v||"").trim())){setProfileError("少なくとも1項目入力してください。");return;}
+    setProfileLoading(true);
+    let existingDocIds=new Set<string>();
+    try{
+      const baseRes=await fetch(`${API_BASE}/api/diagnosis/profile_list`,{headers:authHeaders()});
+      const baseData=await baseRes.json();
+      existingDocIds=new Set((baseData.profiles||[]).map((p:any)=>String(p.doc_id)));
+    }catch(e){}
+    try {
+      const res = await fetch(`${API_BASE}/api/diagnosis/profile_generate`, {
+        method:"POST",headers:authHeaders(),
+        body:JSON.stringify({
+          target_name:profileInput.target_name||"",relationship:profileInput.relationship||"",
+          frequent_words:profileInput.frequent_words||"",conversation_traits:profileInput.conversation_traits||"",
+          judgment_criteria:profileInput.judgment_criteria||"",stress_reaction:profileInput.stress_reaction||"",
+          behavioral_patterns:profileInput.behavioral_patterns||"",interpersonal_needs:profileInput.interpersonal_needs||"",
+          disliked_types:profileInput.disliked_types||"",trust_conditions:profileInput.trust_conditions||"",
+          work_attitude:profileInput.work_attitude||"",preferred_environment:profileInput.preferred_environment||"",
+          breakdown_conditions:profileInput.breakdown_conditions||"",
+          core_values:profileInput.core_values||"",
+          strong_reactions:profileInput.strong_reactions||"",
+          contradictions:profileInput.contradictions||"",
+          obsessions:profileInput.obsessions||"",
+          anger_points:profileInput.anger_points||"",
+          justification_patterns:profileInput.justification_patterns||"",
+          ignored_topics:profileInput.ignored_topics||"",
+          responsibility_shift:profileInput.responsibility_shift||"",
+          behavioral_traces:profileInput.behavioral_traces||"",
+        }),
+      });
+      const data = await res.json();
+      if(data.ok){setProfileResult(data.result);loadProfileHistory();}
+      else setProfileError(data.detail||"エラーが発生しました");
+    } catch(e:any){
+      setProfileError("生成処理中...自動表示まで少々お待ちください。");
+      let found=false;
+      for(let i=0;i<24;i++){
+        await new Promise(resolve=>setTimeout(resolve,5000));
+        try{
+          const r2=await fetch(`${API_BASE}/api/diagnosis/profile_list`,{headers:authHeaders()});
+          const d2=await r2.json();
+          const newProfile=d2.profiles?.find((p:any)=>!existingDocIds.has(p.doc_id));
+          if(newProfile?.result){setProfileResult(newProfile.result);setProfileError("");loadProfileHistory();found=true;break;}
+        }catch(e2){}
+      }
+      if(!found)setProfileError("生成完了。下の履歴の「更新」ボタンを押して確認してください。");
+      loadProfileHistory();
+    } finally{setProfileLoading(false);}
+  };
+  const handleProfilePrint = () => {
+    if(!profileResult) return;
+    const w = window.open("","_blank"); if(!w) return;
+    const a=(profileResult.analysis||{}) as Record<string,string>;
+    const la: Record<string,string> = {thinking_style:"思考傾向",behavioral_principle:"行動原理",emotional_trigger:"感情トリガー",interpersonal_risk:"対人リスク",strengths:"強み",weaknesses:"弱点",approach:"適した接し方",compatible_type:"相性良いタイプ",caution:"注意点",deep_desire:"深層欲求推定"};
+    const pr=profileResult as any;
+    let h="<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>プロファイルレポート</title>";
+    h+="<style>body{font-family:sans-serif;max-width:800px;margin:30px auto;padding:20px;color:#111}h1{font-size:18px;font-weight:800;margin-bottom:4px}h2{font-size:12px;font-weight:700;color:#4f46e5;margin:16px 0 6px;border-bottom:1px solid #e5e7eb;padding-bottom:4px}.s{margin-bottom:8px;padding:10px;border:1px solid #e5e7eb;border-radius:6px}.l{font-size:9px;color:#6b7280;font-weight:700;margin-bottom:3px;text-transform:uppercase}.v{font-size:12px;line-height:1.5}.g{display:grid;grid-template-columns:1fr 1fr;gap:8px}.layer{padding:8px 10px;border-radius:6px;margin-bottom:6px;border-left:3px solid #4f46e5}.chain{padding:8px;background:#f8f8f8;border-radius:6px;margin-bottom:4px}@media print{button{display:none}}</style></head><body>";
+    h+="<h1>🕵️ "+pr.target_name+"</h1><p style=\"color:#6b7280;font-size:11px\">"+( pr.generated_at||"")+" ■ 関係性: "+(pr.relationship||"")+"</p>";
+    if(pr.unique_causal_chain)h+='<h2>■ 固有因果連鎖</h2><div class="s" style="background:#1a0533;border:1px solid #6d28d9"><div class="v" style="color:#e9d5ff;font-size:13px;line-height:1.8">'+pr.unique_causal_chain+'</div></div>';
+    const existFields=[{l:"⚡ 存在接続",k:"existence_connection"},{l:"🌐 世界モデル",k:"learned_world_model"},{l:"🚫 諦め学習",k:"what_was_abandoned"},{l:"👁 無意識痕跡",k:"unconscious_signatures"}];
+    const validExist=existFields.filter(({k})=>pr[k]);
+    if(validExist.length){h+='<h2>■ 存在構造</h2><div class="g">';for(const{l,k} of validExist)h+='<div class="s"><div class="l">'+l+'</div><div class="v">'+pr[k]+'</div></div>';h+='</div>';}
+    h+="<h2>■ 構造レイヤー</h2>";
+    const layers=[{l:"主構造",k:"main_type",c:"#4f46e5"},{l:"副構造",k:"sub_type",c:"#7c3aed"},{l:"ストレス時移行",k:"stress_type",c:"#dc2626"},{l:"対人時変化",k:"interpersonal_type",c:"#059669"}];
+    for(const{l,k,c} of layers){if(pr[k])h+='<div class="layer" style="border-color:'+c+'"><div class="l">'+l+'</div><div class="v">'+pr[k]+'</div></div>';}
+    if(pr.core_motivation)h+="<h2>■ 中心核</h2><div class=\"s\"><div class=\"v\">"+pr.core_motivation+"</div></div>";
+    const secs=[{l:"防衛機能",k:"defense_function"},{l:"現実処理傾向",k:"reality_processing"},{l:"責任接続性",k:"responsibility_connection"},{l:"自尊心維持",k:"self_esteem_maintenance"}];
+    const validSecs=secs.filter(({k})=>pr[k]);
+    if(validSecs.length){h+="<h2>■ 防衛構造</h2><div class=\"g\">";for(const{l,k} of validSecs)h+='<div class="s"><div class="l">'+l+'</div><div class="v">'+pr[k]+'</div></div>';h+="</div>";}
+    const chains=[{l:"起点",k:"chain_trigger"},{l:"一次反応",k:"chain_primary"},{l:"防衛反応",k:"chain_defense"},{l:"結果",k:"chain_result"},{l:"長期化",k:"chain_chronic"}];
+    const validChains=chains.filter(({k})=>pr[k]);
+    if(validChains.length){h+="<h2>■ 行動連鎖</h2>";for(let i=0;i<validChains.length;i++){const{l,k}=validChains[i];h+='<div class="chain"><div class="l">'+l+'</div><div class="v">'+pr[k]+'</div></div>';if(i<validChains.length-1)h+='<div style="text-align:center;color:#6b7280">&darr;</div>';}
+}
+    if(pr.breakdown_prediction||pr.interpersonal_dynamics){h+="<h2>■ 崩壊予測・対人力学</h2><div class=\"g\">";if(pr.breakdown_prediction)h+='<div class="s"><div class="l">崩壊予測</div><div class="v">'+pr.breakdown_prediction+'</div></div>';if(pr.interpersonal_dynamics)h+='<div class="s"><div class="l">対人力学</div><div class="v">'+pr.interpersonal_dynamics+'</div></div>';h+="</div>";}
+    if(Object.keys(a).length){h+="<h2>■ 分析結果</h2><div class=\"g\">";for(const[k,v] of Object.entries(a)){h+='<div class="s"><div class="l">'+(la[k]||k)+'</div><div class="v">'+v+'</div></div>';}h+="</div>";}
+    if(pr.existence_os&&Object.keys(pr.existence_os).some((k:string)=>pr.existence_os[k])){const osL:Record<string,string>={world_os:"🌐 世界OS",self_os:"🪪 自己OS",other_os:"👤 他者OS",safety_os:"🔒 安全OS",attachment_os:"💞 愛着OS",value_os:"💎 価値OS",dominance_os:"👑 支配OS",collapse_os:"💥 崩壊OS",creation_os:"✨ 創造OS"};h+='<h2>■ 存在OSレポート</h2><div class="g">';for(const[k,v] of Object.entries(pr.existence_os as Record<string,string>)){if(v)h+='<div class="s" style="background:#0f172a;border-color:#334155"><div class="l" style="color:#94a3b8">'+(osL[k]||k)+'</div><div class="v" style="color:#e2e8f0">'+v+'</div></div>';}h+='</div>';}
+    if(pr.structure_extraction&&Object.keys(pr.structure_extraction).some((k:string)=>pr.structure_extraction[k])){const seL:Record<string,string>={contradictions:"🔄 繰り返す矛盾",obsessions:"🎯 執着",anger_trigger:"⚡ 怒りポイント",justification:"🛡️ 正義化構造",silence_ignored:"🔇 沈黙・無視論点",responsibility_position:"⚖️ 責任転嫁位置",reality_interpretation:"🧬 現実解釈の構造"};h+='<h2>■ 構造抽出レポート</h2><div class="g">';for(const[k,v] of Object.entries(pr.structure_extraction as Record<string,string>)){if(v)h+='<div class="s"><div class="l" style="color:#7c3aed">'+(seL[k]||k)+'</div><div class="v">'+v+'</div></div>';}h+='</div>';}
+    if(pr.summary)h+="<h2>■ 総合所見</h2><div class=\"s\"><div class=\"v\">"+pr.summary+"</div></div>";
+    h+="<script>window.print();<\/script></body></html>";
+    w.document.write(h); w.document.close();
+  };
+  const loadProfileQuestions = async () => {
+    if(!profileResult) return;
+    setProfileQuestionsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/diagnosis/profile_questions`,{
+        method:"POST",headers:authHeaders(),
+        body:JSON.stringify({profile_result:profileResult}),
+      });
+      const data = await res.json();
+      if(data.ok) setProfileQuestions(data.questions);
+    } catch(e){} finally{setProfileQuestionsLoading(false);}
+  };
+  const askProfileQuestion = async (q:string) => {
+    if(!q.trim()||!profileResult) return;
+    setProfileAnswerLoading(true);
+    setProfileAnsweredQuestion(q);
+    setProfileAnswer("");
+    try {
+      const res = await fetch(`${API_BASE}/api/diagnosis/profile_followup`,{
+        method:"POST",headers:authHeaders(),
+        body:JSON.stringify({profile_result:profileResult,question:q}),
+      });
+      const data = await res.json();
+      if(data.ok) setProfileAnswer(data.answer);
+    } catch(e){} finally{setProfileAnswerLoading(false);setProfileCustomQuestion("");}
+  };
+    const allTabs: {id:TabId;label:string;flag?:string}[] = [
     {id:"diagnosis",label:"🔬 現状課題診断"},
     {id:"structure",label:"🏗️ 構造診断",flag:"diag_structure"},
     {id:"issue",label:"🎯 課題仮説",flag:"diag_issue"},
@@ -288,8 +452,10 @@ function DiagnosisPageInner() {
     {id:"graph",label:"📊 会話の可視化",flag:"diag_graph"},
     {id:"file",label:"🧾 ファイル診断",flag:"diag_file"},
     {id:"presentation",label:"📊 プレゼン資料",flag:"diag_presentation"},
+    {id:"future",label:"🔮 未来分岐シミュレーター",flag:"diag_future"},
+    {id:"profile",label:"🕵️ プロファイル生成",flag:"diag_profile"},
   ];
-  const TABS = allTabs.filter(t=>!t.flag || features[t.flag] !== false);
+  const TABS = allTabs.filter(t=>!t.flag || (featuresLoaded && features[t.flag] === true));
 
   const renderConsultResult = () => {
     if (!consultResult) return null;
@@ -1282,13 +1448,455 @@ function DiagnosisPageInner() {
           <PresentationTool />
         )}
 
-        {tab==="file" && (
+        {tab==="future" && (
+          <div className="space-y-4">
+            <div style={{background:"linear-gradient(135deg,#0f172a,#1e1b4b)",borderRadius:"20px",padding:"20px 24px",boxShadow:"0 8px 32px rgba(99,102,241,0.25)"}}>
+              <p style={{color:"rgba(255,255,255,0.35)",fontSize:"9px",letterSpacing:"0.2em",fontWeight:700,marginBottom:"6px"}}>FUTURE SIMULATION</p>
+              <h2 style={{color:"white",fontWeight:900,fontSize:"17px",marginBottom:"3px"}}>🔮 未来分岐シミュレーター</h2>
+              <p style={{color:"rgba(255,255,255,0.38)",fontSize:"11px",marginBottom:"16px"}}>現状・目標・課題を入力してください。ASCENDが複数の未来分岐を生成し、最適ルートを提示します。</p>
+              <textarea value={futureInput} onChange={e=>setFutureInput(e.target.value)}
+                placeholder="例：売上が3ヶ月連続で下がっている&#10;例：副業を始めたい&#10;例：このまま現職を続けるべきか迷っている&#10;例：新規事業に投資するか放置するか判断したい"
+                rows={4} style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:"12px",color:"white",padding:"12px",fontSize:"13px",resize:"vertical",boxSizing:"border-box"}}
+                className="focus:outline-none placeholder-gray-500"/>
+              <button onClick={async()=>{
+                if(!futureInput.trim()){setFutureError("入力してください");return;}
+                setFutureLoading(true);setFutureError("");setFutureResult(null);
+                try{
+                  const token=localStorage.getItem("ascend_token")||"";
+                  const API_BASE=process.env.NEXT_PUBLIC_API_URL||"";
+                  const r=await fetch(`${API_BASE}/api/diagnosis/future_simulation`,{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`},body:JSON.stringify({message:futureInput.trim(),ai_tier:"core"})});
+                  const d=await r.json();
+                  if(!r.ok){setFutureError(d.detail||"エラーが発生しました");return;}
+                  setFutureResult(d.result);
+                    loadFutureHistory();
+                }catch(e){setFutureError("通信エラーが発生しました");}
+                finally{setFutureLoading(false);}
+              }} disabled={futureLoading||!futureInput.trim()}
+                style={{marginTop:"12px",background:"linear-gradient(135deg,#4f46e5,#7c3aed)",border:"none",borderRadius:"12px",color:"white",fontWeight:700,fontSize:"13px",padding:"10px 28px",cursor:"pointer",opacity:futureLoading||!futureInput.trim()?0.5:1}}>
+                {futureLoading?"🔮 分析中...":"🔮 未来を分岐する"}
+              </button>
+              {futureError && <p style={{color:"#f87171",fontSize:"12px",marginTop:"8px"}}>{futureError}</p>}
+            </div>
+            {futureResult && (
+              <div className="space-y-4">
+                {/* 現状認識 */}
+                <div style={{background:"rgba(79,70,229,0.08)",border:"1px solid rgba(79,70,229,0.2)",borderRadius:"16px",padding:"16px"}}>
+                  <p style={{fontSize:"11px",fontWeight:700,color:"#4f46e5",marginBottom:"6px"}}>📍 現状認識</p>
+                  <p style={{fontSize:"13px",color:"#111827",lineHeight:1.7}}>{futureResult.current_state}</p>
+                </div>
+                {/* 因果分析 */}
+                {futureResult.causal_analysis && (
+                  <div style={{background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:"16px",padding:"20px"}}>
+                    <p style={{fontSize:"11px",fontWeight:700,color:"#ea580c",marginBottom:"14px",letterSpacing:"0.1em"}}>🔍 因果分析 — なぜこの状況に至ったか</p>
+                    {/* 根本原因 */}
+                    <p style={{fontSize:"11px",fontWeight:700,color:"#9a3412",marginBottom:"8px"}}>根本原因</p>
+                    <div className="space-y-2" style={{marginBottom:"16px"}}>
+                      {futureResult.causal_analysis.root_causes?.map((c:string,i:number)=>(
+                        <div key={i} style={{display:"flex",gap:"10px",alignItems:"flex-start"}}>
+                          <span style={{background:"#ea580c",color:"white",borderRadius:"50%",width:"18px",height:"18px",fontSize:"10px",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:"1px"}}>{i+1}</span>
+                          <p style={{fontSize:"13px",color:"#431407",lineHeight:1.6,margin:0}}>{c}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {/* 因果チェーン */}
+                    <p style={{fontSize:"11px",fontWeight:700,color:"#9a3412",marginBottom:"8px"}}>因果連鎖</p>
+                    <div style={{marginBottom:"16px",background:"rgba(234,88,12,0.04)",borderRadius:"10px",padding:"12px"}}>
+                      {futureResult.causal_analysis.causal_chain?.map((ch:any,i:number)=>{
+                        const isLast=i===futureResult.causal_analysis.causal_chain.length-1;
+                        return(
+                          <div key={i}>
+                            <div style={{display:"flex",gap:"8px",alignItems:"flex-start"}}>
+                              <span style={{fontSize:"10px",fontWeight:700,color:"#ea580c",flexShrink:0,marginTop:"2px"}}>原因</span>
+                              <p style={{fontSize:"12px",color:"#431407",margin:0,lineHeight:1.6}}>{ch.cause}</p>
+                            </div>
+                            <div style={{paddingLeft:"8px",borderLeft:"2px solid #fed7aa",marginLeft:"16px",marginTop:"2px",marginBottom:"2px"}}>
+                              <span style={{fontSize:"10px",color:"#ea580c"}}>↓</span>
+                            </div>
+                            <div style={{display:"flex",gap:"8px",alignItems:"flex-start",marginBottom:isLast?0:"12px"}}>
+                              <span style={{fontSize:"10px",fontWeight:700,color:"#c2410c",flexShrink:0,marginTop:"2px"}}>結果</span>
+                              <p style={{fontSize:"12px",color:"#431407",margin:0,lineHeight:1.6}}>{ch.effect}</p>
+                            </div>
+                            {!isLast && <div style={{paddingLeft:"8px",borderLeft:"2px solid #fed7aa",marginLeft:"16px",marginTop:"2px",marginBottom:"2px"}}><span style={{fontSize:"10px",color:"#ea580c"}}>↓</span></div>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {/* 繰り返しパターン */}
+                    <p style={{fontSize:"11px",fontWeight:700,color:"#9a3412",marginBottom:"6px"}}>繰り返しパターン</p>
+                    <p style={{fontSize:"13px",color:"#431407",lineHeight:1.7,marginBottom:"16px",background:"rgba(234,88,12,0.06)",borderRadius:"8px",padding:"10px"}}>{futureResult.causal_analysis.repeat_pattern}</p>
+                    {/* 警戒ライン */}
+                    <p style={{fontSize:"11px",fontWeight:700,color:"#9a3412",marginBottom:"8px"}}>⚠️ 同じ失敗を防ぐ警戒ライン</p>
+                    <div className="space-y-2">
+                      {futureResult.causal_analysis.warning_signs?.map((w:string,i:number)=>(
+                        <div key={i} style={{display:"flex",gap:"8px",alignItems:"flex-start",background:"rgba(239,68,68,0.05)",border:"1px solid rgba(239,68,68,0.15)",borderRadius:"8px",padding:"8px 12px"}}>
+                          <span style={{fontSize:"13px",flexShrink:0}}>🚨</span>
+                          <p style={{fontSize:"12px",color:"#7f1d1d",margin:0,lineHeight:1.6}}>{w}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* 分岐カード */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:"12px"}}>
+                  {futureResult.branches?.map((b:any)=>{
+                    const isRec = b.id===futureResult.recommended;
+                    const isAvoid = b.id===futureResult.avoid_branch;
+                    const borderColor = isRec?"#4f46e5":isAvoid?"#ef4444":"rgba(0,0,0,0.08)";
+                    const bgColor = isRec?"rgba(79,70,229,0.04)":isAvoid?"rgba(239,68,68,0.03)":"white";
+                    const riskColor = b.risk==="高"?"#ef4444":b.risk==="中"?"#f59e0b":"#10b981";
+                    return (
+                      <div key={b.id} style={{background:bgColor,border:`2px solid ${borderColor}`,borderRadius:"16px",padding:"16px",position:"relative"}}>
+                        {isRec && <span style={{position:"absolute",top:"10px",right:"10px",background:"#4f46e5",color:"white",fontSize:"9px",fontWeight:700,padding:"2px 8px",borderRadius:"20px"}}>推奨</span>}
+                        {isAvoid && <span style={{position:"absolute",top:"10px",right:"10px",background:"#ef4444",color:"white",fontSize:"9px",fontWeight:700,padding:"2px 8px",borderRadius:"20px"}}>回避</span>}
+                        <p style={{fontSize:"10px",fontWeight:700,color:"#6b7280",marginBottom:"4px"}}>ルート {b.id}</p>
+                        <p style={{fontSize:"14px",fontWeight:900,color:"#111827",marginBottom:"10px"}}>{b.label}</p>
+                        <div style={{display:"flex",gap:"8px",marginBottom:"10px",flexWrap:"wrap"}}>
+                          <span style={{background:"rgba(0,0,0,0.04)",borderRadius:"8px",padding:"2px 8px",fontSize:"10px",fontWeight:700,color:"#374151"}}>成功率 {b.success_rate}%</span>
+                          <span style={{background:`${riskColor}18`,borderRadius:"8px",padding:"2px 8px",fontSize:"10px",fontWeight:700,color:riskColor}}>リスク {b.risk}</span>
+                        </div>
+                        <ul style={{margin:0,padding:"0 0 0 14px",marginBottom:"10px"}}>
+                          {b.points?.map((p:string,i:number)=>(
+                            <li key={i} style={{fontSize:"12px",color:"#374151",lineHeight:1.7,marginBottom:"2px"}}>{p}</li>
+                          ))}
+                        </ul>
+                        <div style={{borderTop:"1px solid rgba(0,0,0,0.06)",paddingTop:"8px",marginTop:"4px"}}>
+                          <p style={{fontSize:"10px",color:"#6b7280",marginBottom:"2px"}}>必要行動</p>
+                          <p style={{fontSize:"12px",fontWeight:700,color:"#111827"}}>{b.required_action}</p>
+                          <p style={{fontSize:"10px",color:"#6b7280",marginTop:"4px",marginBottom:"2px"}}>到達する未来</p>
+                          <p style={{fontSize:"12px",fontWeight:700,color:"#111827"}}>{b.future}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {/* 未来マップ */}
+                <div style={{background:"#0f172a",borderRadius:"16px",padding:"16px"}}>
+                  <p style={{fontSize:"11px",fontWeight:700,color:"rgba(255,255,255,0.5)",marginBottom:"10px"}}>🗺️ 未来マップ</p>
+                  <div style={{fontFamily:"monospace",fontSize:"12px",color:"rgba(255,255,255,0.85)",lineHeight:2}}>
+                    <div>現在</div>
+                    {futureResult.branches?.map((b:any,i:number)=>{
+                      const isLast=i===futureResult.branches.length-1;
+                      const isRec=b.id===futureResult.recommended;
+                      const color=isRec?"#a5b4fc":"rgba(255,255,255,0.7)";
+                      return <div key={b.id} style={{color}}>{isLast?" └─":" ├─"} {b.label} → {b.future}</div>;
+                    })}
+                  </div>
+                </div>
+                {/* 最終出力 */}
+                <div style={{background:"linear-gradient(135deg,#1e1b4b,#0f172a)",borderRadius:"16px",padding:"20px"}}>
+                  <p style={{fontSize:"11px",fontWeight:700,color:"rgba(255,255,255,0.4)",marginBottom:"12px",letterSpacing:"0.1em"}}>ASCEND FINAL OUTPUT</p>
+                  <p style={{color:"rgba(255,255,255,0.5)",fontSize:"11px",marginBottom:"4px"}}>最も合理的な未来</p>
+                  <p style={{color:"#a5b4fc",fontWeight:900,fontSize:"18px",marginBottom:"6px"}}>ルート {futureResult.recommended}</p>
+                  <p style={{color:"rgba(255,255,255,0.75)",fontSize:"12px",lineHeight:1.7,marginBottom:"16px"}}>{futureResult.recommended_reason}</p>
+                  <p style={{color:"rgba(255,255,255,0.5)",fontSize:"11px",marginBottom:"8px"}}>今すぐやるべきこと</p>
+                  {futureResult.immediate_actions?.map((a:string,i:number)=>(
+                    <div key={i} style={{display:"flex",gap:"10px",alignItems:"flex-start",marginBottom:"6px"}}>
+                      <span style={{background:"#4f46e5",color:"white",borderRadius:"50%",width:"18px",height:"18px",fontSize:"10px",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:"1px"}}>{i+1}</span>
+                      <p style={{color:"white",fontSize:"13px",lineHeight:1.6,margin:0}}>{a}</p>
+                    </div>
+                  ))}
+                  <div style={{marginTop:"16px",borderTop:"1px solid rgba(255,255,255,0.1)",paddingTop:"12px"}}>
+                    <p style={{color:"rgba(255,255,255,0.5)",fontSize:"11px",marginBottom:"4px"}}>避けるべき未来</p>
+                    <p style={{color:"#f87171",fontWeight:700,fontSize:"13px",marginBottom:"4px"}}>ルート {futureResult.avoid_branch}</p>
+                    <p style={{color:"rgba(255,255,255,0.6)",fontSize:"12px",lineHeight:1.7}}>{futureResult.avoid_reason}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {tab==="future" && (
+        <div style={{background:"white",borderRadius:"16px",padding:"16px 20px",boxShadow:"0 2px 8px rgba(0,0,0,0.06)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"12px"}}>
+            <h4 style={{fontWeight:700,fontSize:"13px",color:"#111827"}}>🔮 過去のシミュレーション履歴</h4>
+            <button onClick={loadFutureHistory} style={{fontSize:"11px",color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>更新</button>
+          </div>
+          {futureHistory.length===0?(
+            <p style={{fontSize:"12px",color:"#9ca3af",textAlign:"center" as const,padding:"12px 0"}}>履歴なし（「更新」を押してください）</p>
+          ):futureHistory.map(h=>(
+            <div key={h.doc_id} style={{padding:"10px 12px",borderRadius:"10px",border:"1px solid rgba(0,0,0,0.07)",marginBottom:"8px",background:"#f8f9fc"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"4px"}}>
+                <div style={{flex:1,minWidth:0,marginRight:"8px"}}>
+                  <p style={{fontWeight:600,fontSize:"12px",color:"#111827",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" as const}}>{h.message||"（入力なし）"}</p>
+                  <p style={{fontSize:"10px",color:"#9ca3af"}}>{(h.created_at||"").slice(0,16)}</p>
+                </div>
+                <div style={{display:"flex",gap:"4px",flexShrink:0}}>
+                  <button onClick={()=>{if(h.result){setFutureResult(h.result);window.scrollTo({top:0,behavior:"smooth"});}}} style={{fontSize:"10px",color:"#4f46e5",background:"none",border:"1px solid #4f46e5",borderRadius:"6px",padding:"2px 7px",cursor:"pointer"}}>開く</button>
+                  <button onClick={()=>deleteFutureSimulation(h.doc_id)} style={{fontSize:"10px",color:"#ef4444",background:"none",border:"1px solid #ef4444",borderRadius:"6px",padding:"2px 7px",cursor:"pointer"}}>削除</button>
+                </div>
+              </div>
+              {h.result?.recommended && (
+                <p style={{fontSize:"11px",color:"#6b7280"}}>推奨: ルート {h.result.recommended}　{(h.result?.recommended_reason||"").slice(0,40)}{(h.result?.recommended_reason||"").length>40?"…":""}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {tab==="file" && (
           <div className="space-y-4">
             <div style={{background:"linear-gradient(135deg,#0f172a,#1e293b)",borderRadius:"20px",padding:"20px 24px",boxShadow:"0 8px 32px rgba(99,102,241,0.2)"}}>
               <p style={{color:"rgba(255,255,255,0.35)",fontSize:"9px",letterSpacing:"0.2em",fontWeight:700,marginBottom:"6px"}}>FILE DIAGNOSIS</p>
               <h2 style={{color:"white",fontWeight:900,fontSize:"17px",marginBottom:"3px"}}>🧾 ファイル診断</h2>
               <p style={{color:"rgba(255,255,255,0.38)",fontSize:"11px",marginBottom:"16px"}}>ファイルをアップロードして全タブを横断解析し、構造診断・課題仮説・実行計画を一括生成します</p>
               <FileDiagnosis C={C} />
+            </div>
+          </div>
+        )}
+        {tab==="profile" && mounted && (
+          <div className="space-y-4">
+            <div style={{background:"linear-gradient(135deg,#0f172a,#1e1b4b)",borderRadius:"20px",padding:"20px 24px",boxShadow:"0 8px 32px rgba(99,102,241,0.25)"}}>
+              <p style={{color:"rgba(255,255,255,0.35)",fontSize:"9px",letterSpacing:"0.2em",fontWeight:700,marginBottom:"6px"}}>PROFILE ANALYSIS</p>
+              <h2 style={{color:"white",fontWeight:900,fontSize:"17px",marginBottom:"3px"}}>🕵️ プロファイル生成</h2>
+              <p style={{color:"rgba(255,255,255,0.38)",fontSize:"11px",marginBottom:"16px"}}>対象者の言動・反応・価値基準から行動原理・思考傾向・対人構造を分析します。</p>
+              <p style={{color:"rgba(255,255,255,0.45)",fontSize:"10px",fontWeight:800,letterSpacing:"0.1em",marginBottom:"8px"}}>基本情報</p>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px",marginBottom:"4px"}}>
+                {([{key:"target_name",label:"対象者名（任意）",ph:"例：田中さん"},{key:"relationship",label:"関係性",ph:"上司・恋人・部下・顧客"}] as {key:string;label:string;ph:string}[]).map(({key,label,ph})=>(
+                  <div key={key}>
+                    <p style={{color:"rgba(255,255,255,0.6)",fontSize:"11px",marginBottom:"3px"}}>{label}</p>
+                    <input value={profileInput[key]||""} onChange={e=>setProfileInput(p=>({...p,[key]:e.target.value}))} placeholder={ph} style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"8px",color:"white",padding:"8px 10px",fontSize:"12px",boxSizing:"border-box"}} className="focus:outline-none"/>
+                  </div>
+                ))}
+              </div>
+              <p style={{color:"rgba(255,255,255,0.45)",fontSize:"10px",fontWeight:800,letterSpacing:"0.1em",marginTop:"14px",marginBottom:"8px"}}>💬 会話傾向</p>
+              {([{key:"frequent_words",label:"よく使う言葉・話題（複数入力可）",ph:"効率、不安、承認、お金、他人批判、理想論"},{key:"conversation_traits",label:"会話時の特徴",ph:"話を遮る、結論を急ぐ、感情で広がる、自分語りが多い、否定から入る"}] as {key:string;label:string;ph:string}[]).map(({key,label,ph})=>(
+                <div key={key} style={{marginBottom:"8px"}}>
+                  <p style={{color:"rgba(255,255,255,0.6)",fontSize:"11px",marginBottom:"3px"}}>{label}</p>
+                  <textarea value={profileInput[key]||""} onChange={e=>setProfileInput(p=>({...p,[key]:e.target.value}))} rows={2} placeholder={ph} style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"8px",color:"white",padding:"8px 10px",fontSize:"12px",resize:"vertical",boxSizing:"border-box"}} className="focus:outline-none placeholder-gray-600"/>
+                </div>
+              ))}
+              <p style={{color:"rgba(255,255,255,0.45)",fontSize:"10px",fontWeight:800,letterSpacing:"0.1em",marginTop:"14px",marginBottom:"8px"}}>⚙️ 行動構造</p>
+              {([{key:"judgment_criteria",label:"判断基準（何を優先して動くか）",ph:"損得、安心、承認、支配、愛情、正義、合理性"},{key:"stress_reaction",label:"ストレス時の反応（当てはまるものを入力）",ph:"他責、自責、無反応、逃避、過剰防衛"},{key:"behavioral_patterns",label:"繰り返す行動パターン",ph:"先延ばし、依存、過集中、被害者化"}] as {key:string;label:string;ph:string}[]).map(({key,label,ph})=>(
+                <div key={key} style={{marginBottom:"8px"}}>
+                  <p style={{color:"rgba(255,255,255,0.6)",fontSize:"11px",marginBottom:"3px"}}>{label}</p>
+                  <textarea value={profileInput[key]||""} onChange={e=>setProfileInput(p=>({...p,[key]:e.target.value}))} rows={2} placeholder={ph} style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"8px",color:"white",padding:"8px 10px",fontSize:"12px",resize:"vertical",boxSizing:"border-box"}} className="focus:outline-none placeholder-gray-600"/>
+                </div>
+              ))}
+              <p style={{color:"rgba(255,255,255,0.45)",fontSize:"10px",fontWeight:800,letterSpacing:"0.1em",marginTop:"14px",marginBottom:"8px"}}>👥 対人構造</p>
+              {([{key:"interpersonal_needs",label:"人間関係で求めるもの",ph:"安心感、優位性、承認、支配、共感、距離感"},{key:"disliked_types",label:"苦手な相手",ph:"圧が強い人、論理型、感情型、指示的な人"},{key:"trust_conditions",label:"信頼する条件",ph:"話を聴く、否定しない、有能さ、一貫性、秘密保持"}] as {key:string;label:string;ph:string}[]).map(({key,label,ph})=>(
+                <div key={key} style={{marginBottom:"8px"}}>
+                  <p style={{color:"rgba(255,255,255,0.6)",fontSize:"11px",marginBottom:"3px"}}>{label}</p>
+                  <textarea value={profileInput[key]||""} onChange={e=>setProfileInput(p=>({...p,[key]:e.target.value}))} rows={2} placeholder={ph} style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"8px",color:"white",padding:"8px 10px",fontSize:"12px",resize:"vertical",boxSizing:"border-box"}} className="focus:outline-none placeholder-gray-600"/>
+                </div>
+              ))}
+              <p style={{color:"rgba(255,255,255,0.45)",fontSize:"10px",fontWeight:800,letterSpacing:"0.1em",marginTop:"14px",marginBottom:"8px"}}>💼 仕事・行動特性</p>
+              {([{key:"work_attitude",label:"仕事への姿勢",ph:"完璧主義、責任感強い、受け身、独立型、評価依存"},{key:"preferred_environment",label:"得意な環境",ph:"裁量あり、明確指示、少人数、競争環境"},{key:"breakdown_conditions",label:"崩れる条件",ph:"管理過多、曖昧指示、否定、孤立、プレッシャー"}] as {key:string;label:string;ph:string}[]).map(({key,label,ph})=>(
+                <div key={key} style={{marginBottom:"8px"}}>
+                  <p style={{color:"rgba(255,255,255,0.6)",fontSize:"11px",marginBottom:"3px"}}>{label}</p>
+                  <textarea value={profileInput[key]||""} onChange={e=>setProfileInput(p=>({...p,[key]:e.target.value}))} rows={2} placeholder={ph} style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"8px",color:"white",padding:"8px 10px",fontSize:"12px",resize:"vertical",boxSizing:"border-box"}} className="focus:outline-none placeholder-gray-600"/>
+                </div>
+              ))}
+              <p style={{color:"rgba(255,255,255,0.45)",fontSize:"10px",fontWeight:800,letterSpacing:"0.1em",marginTop:"14px",marginBottom:"8px"}}>🧭 価値観・信念</p>
+              {([{key:"core_values",label:"大事にしているもの（複数入力可）",ph:"自由、成長、安定、愛情、支配、誠実、結果"},{key:"strong_reactions",label:"強く反応すること（当てはまるものを入力）",ph:"否定、無視、裏切り、失敗、軽視、不公平"}] as {key:string;label:string;ph:string}[]).map(({key,label,ph})=>(
+                <div key={key} style={{marginBottom:"8px"}}>
+                  <p style={{color:"rgba(255,255,255,0.6)",fontSize:"11px",marginBottom:"3px"}}>{label}</p>
+                  <textarea value={profileInput[key]||""} onChange={e=>setProfileInput(p=>({...p,[key]:e.target.value}))} rows={2} placeholder={ph} style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"8px",color:"white",padding:"8px 10px",fontSize:"12px",resize:"vertical",boxSizing:"border-box"}} className="focus:outline-none placeholder-gray-600"/>
+                </div>
+              ))}
+              <p style={{color:"rgba(255,255,255,0.45)",fontSize:"10px",fontWeight:800,letterSpacing:"0.1em",marginTop:"14px",marginBottom:"8px"}}>🔍 構造的シグナル</p>
+              {([{key:"contradictions",label:"繰り返す矛盾（何度も起きるパターン）",ph:"約束を守らない、話題をすり替える、認めない後に謝る"},{key:"obsessions",label:"執着していること",ph:"評価、地位、特定の人、お金、承認、正しさ"},{key:"anger_points",label:"強く反応・怒るポイント",ph:"コントロールを失う、否定される、無視される、責められる"}] as {key:string;label:string;ph:string}[]).map(({key,label,ph})=>(
+                <div key={key} style={{marginBottom:"8px"}}>
+                  <p style={{color:"rgba(255,255,255,0.6)",fontSize:"11px",marginBottom:"3px"}}>{label}</p>
+                  <textarea value={profileInput[key]||""} onChange={e=>setProfileInput(p=>({...p,[key]:e.target.value}))} rows={2} placeholder={ph} style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"8px",color:"white",padding:"8px 10px",fontSize:"12px",resize:"vertical",boxSizing:"border-box"}} className="focus:outline-none placeholder-gray-600"/>
+                </div>
+              ))}
+              <p style={{color:"rgba(255,255,255,0.45)",fontSize:"10px",fontWeight:800,letterSpacing:"0.1em",marginTop:"14px",marginBottom:"8px"}}>⚖️ 正義化・責任構造</p>
+              {([{key:"justification_patterns",label:"正義化・自己正当化パターン",ph:"自分は悪くない、環境が悪い、仕方なかった、お前のせい"},{key:"ignored_topics",label:"無視する論点・沈黙する箇所",ph:"責任の話になると黙る、数字を聞くと話題を変える"},{key:"responsibility_shift",label:"責任転嫁の方向",ph:"上司のせい、部下のせい、環境のせい、運のせい"}] as {key:string;label:string;ph:string}[]).map(({key,label,ph})=>(
+                <div key={key} style={{marginBottom:"8px"}}>
+                  <p style={{color:"rgba(255,255,255,0.6)",fontSize:"11px",marginBottom:"3px"}}>{label}</p>
+                  <textarea value={profileInput[key]||""} onChange={e=>setProfileInput(p=>({...p,[key]:e.target.value}))} rows={2} placeholder={ph} style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"8px",color:"white",padding:"8px 10px",fontSize:"12px",resize:"vertical",boxSizing:"border-box"}} className="focus:outline-none placeholder-gray-600"/>
+                </div>
+              ))}
+              <p style={{color:"rgba(255,255,255,0.45)",fontSize:"10px",fontWeight:800,letterSpacing:"0.1em",marginTop:"14px",marginBottom:"8px"}}>🔍 行動痕跡（環境への無意識の刻印）</p>
+              <div style={{marginBottom:"8px"}}>
+                <p style={{color:"rgba(255,255,255,0.6)",fontSize:"11px",marginBottom:"3px"}}>観察された行動痕跡（複数記入・箇条書き推奨）</p>
+                <textarea value={profileInput["behavioral_traces"]||""} onChange={e=>setProfileInput(p=>({...p,behavioral_traces:e.target.value}))} rows={4} placeholder={"会議で結論直前に別議題を出す / 報告メールが長いほど謝罪が増える / 完成直前でやり直しを要求する / 机が常に物で隠れている / 食事を必ず残す"} style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"8px",color:"white",padding:"8px 10px",fontSize:"12px",resize:"vertical",boxSizing:"border-box"}} className="focus:outline-none placeholder-gray-600"/>
+              </div>
+              <button onClick={handleProfileGenerate} disabled={profileLoading} style={{width:"100%",padding:"12px",borderRadius:"12px",background:profileLoading?"rgba(255,255,255,0.1)":"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"white",fontWeight:700,fontSize:"14px",border:"none",cursor:profileLoading?"not-allowed":"pointer",marginTop:"16px"}}>
+                {profileLoading?"🔄 分析中...":"🕵️ プロファイルを生成する"}
+              </button>
+              {profileError && <p style={{color:"#f87171",fontSize:"12px",marginTop:"8px",padding:"8px 12px",background:"rgba(248,113,113,0.12)",borderRadius:"8px"}}>⚠️ {profileError}</p>}
+            </div>
+            {profileResult && (
+              <div id="profile-result-output" style={{background:"white",borderRadius:"20px",padding:"20px 24px",boxShadow:"0 4px 16px rgba(0,0,0,0.08)"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"20px"}}>
+                  <div>
+                    <p style={{fontSize:"11px",color:"#6b7280",marginBottom:"2px"}}>{profileResult.generated_at} ■ {profileResult.relationship}</p>
+                    <h3 style={{fontWeight:800,fontSize:"16px",color:"#111827"}}>{profileResult.target_name}</h3>
+                  </div>
+                  <button onClick={handleProfilePrint} style={{padding:"8px 16px",borderRadius:"10px",background:"#4f46e5",color:"white",fontWeight:700,fontSize:"13px",border:"none",cursor:"pointer"}}>🖨️ 印刷・保存</button>
+                </div>
+                {(profileResult as any).unique_causal_chain && (
+                  <div style={{background:"linear-gradient(135deg,#1a0533,#2d1066)",borderRadius:"14px",padding:"16px 18px",marginBottom:"14px",border:"1px solid rgba(139,92,246,0.3)"}}>
+                    <p style={{fontSize:"9px",color:"rgba(167,139,250,0.8)",fontWeight:700,letterSpacing:"0.15em",marginBottom:"10px"}}>🔗 固有因果連鎖 / UNIQUE CAUSAL CHAIN</p>
+                    <p style={{fontSize:"13px",color:"rgba(255,255,255,0.95)",lineHeight:"1.8",fontWeight:500}}>{(profileResult as any).unique_causal_chain}</p>
+                  </div>
+                )}
+                {((profileResult as any).existence_connection||(profileResult as any).learned_world_model||(profileResult as any).what_was_abandoned||(profileResult as any).unconscious_signatures) && (
+                  <div style={{marginBottom:"14px"}}>
+                    <p style={{fontSize:"10px",color:"#111827",fontWeight:700,letterSpacing:"0.1em",marginBottom:"8px"}}>🧬 存在構造レポート</p>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px"}}>
+                      {([{k:"existence_connection",l:"⚡ 存在接続",c:"#dc2626",bg:"#fff1f2"},{k:"learned_world_model",l:"🌐 世界モデル",c:"#0284c7",bg:"#f0f9ff"},{k:"what_was_abandoned",l:"🚫 諦め学習",c:"#7c3aed",bg:"#faf5ff"},{k:"unconscious_signatures",l:"👁 無意識痕跡",c:"#059669",bg:"#f0fdf4"}] as {k:string;l:string;c:string;bg:string}[]).filter(({k})=>(profileResult as any)[k]).map(({k,l,c,bg})=>(
+                        <div key={k} style={{background:bg,borderLeft:`3px solid ${c}`,padding:"10px 12px",borderRadius:"0 8px 8px 0"}}>
+                          <p style={{fontSize:"9px",color:c,fontWeight:700,marginBottom:"4px"}}>{l}</p>
+                          <p style={{fontSize:"11px",color:"#111827",lineHeight:"1.5"}}>{(profileResult as any)[k]}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {(profileResult.main_type||profileResult.sub_type) && (
+                  <div style={{marginBottom:"14px"}}>
+                    <p style={{fontSize:"10px",color:"#6b7280",fontWeight:700,letterSpacing:"0.1em",marginBottom:"8px"}}>■ 構造レイヤー</p>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px"}}>
+                      {[{label:"主構造",val:profileResult.main_type,c:"#4f46e5",bg:"#eef2ff"},{label:"副構造",val:profileResult.sub_type,c:"#7c3aed",bg:"#faf5ff"},{label:"ストレス時移行",val:profileResult.stress_type,c:"#dc2626",bg:"#fef2f2"},{label:"対人時変化",val:profileResult.interpersonal_type,c:"#059669",bg:"#f0fdf4"}].filter(x=>x.val).map(({label,val,c,bg})=>(
+                        <div key={label} style={{background:bg,borderLeft:`3px solid ${c}`,padding:"8px 10px",borderRadius:"0 8px 8px 0"}}>
+                          <p style={{fontSize:"9px",color:c,fontWeight:700,marginBottom:"2px"}}>{label}</p>
+                          <p style={{fontSize:"11px",color:"#111827",lineHeight:"1.4"}}>{val}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {profileResult.core_motivation && (
+                  <div style={{background:"#fef2f2",borderLeft:"3px solid #ef4444",padding:"12px 14px",borderRadius:"0 10px 10px 0",marginBottom:"10px"}}>
+                    <p style={{fontSize:"9px",color:"#ef4444",fontWeight:700,marginBottom:"4px"}}>🎯 中心核（何を恐れ、何を守ろうとしているか）</p>
+                    <p style={{fontSize:"12px",color:"#111827",lineHeight:"1.6"}}>{profileResult.core_motivation}</p>
+                  </div>
+                )}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px",marginBottom:"10px"}}>
+                  {([{k:"defense_function",l:"🛡️ 防衛機能",c:"#f59e0b",bg:"#fffbeb"},{k:"reality_processing",l:"🔄 現実処理傾向",c:"#6366f1",bg:"#eef2ff"},{k:"responsibility_connection",l:"⚖️ 責任接続性",c:"#8b5cf6",bg:"#faf5ff"},{k:"self_esteem_maintenance",l:"💠 自尊心維持",c:"#0891b2",bg:"#ecfeff"}] as {k:string;l:string;c:string;bg:string}[]).filter(({k})=>(profileResult as any)[k]).map(({k,l,c,bg})=>(
+                    <div key={k} style={{background:bg,borderLeft:`3px solid ${c}`,padding:"8px 10px",borderRadius:"0 8px 8px 0"}}>
+                      <p style={{fontSize:"9px",color:c,fontWeight:700,marginBottom:"3px"}}>{l}</p>
+                      <p style={{fontSize:"11px",color:"#111827",lineHeight:"1.5"}}>{(profileResult as any)[k]}</p>
+                    </div>
+                  ))}
+                </div>
+                {profileResult.chain_trigger && (
+                  <div style={{background:"linear-gradient(135deg,#0f172a,#1e1b4b)",borderRadius:"14px",padding:"14px 16px",marginBottom:"10px"}}>
+                    <p style={{fontSize:"9px",color:"rgba(255,255,255,0.45)",fontWeight:700,letterSpacing:"0.1em",marginBottom:"10px"}}>⛓️ 行動連鎖</p>
+                    {([{k:"chain_trigger",l:"起点"},{k:"chain_primary",l:"一次反応"},{k:"chain_defense",l:"防衛反応"},{k:"chain_result",l:"結果"},{k:"chain_chronic",l:"長期化"}] as {k:string;l:string}[]).filter(({k})=>(profileResult as any)[k]).map(({k,l},i,arr)=>(
+                      <div key={k} style={{marginBottom:i<arr.length-1?"8px":"0"}}>
+                        <div style={{display:"flex",alignItems:"flex-start",gap:"8px"}}>
+                          <span style={{minWidth:"52px",background:"rgba(99,102,241,0.3)",borderRadius:"4px",padding:"2px 6px",fontSize:"9px",color:"rgba(255,255,255,0.7)",fontWeight:700,textAlign:"center",marginTop:"2px"}}>{l}</span>
+                          <p style={{fontSize:"12px",color:"rgba(255,255,255,0.9)",lineHeight:"1.5"}}>{(profileResult as any)[k]}</p>
+                        </div>
+                        {i<arr.length-1 && <p style={{color:"rgba(99,102,241,0.5)",fontSize:"12px",marginLeft:"30px",marginTop:"2px"}}>↓</p>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px",marginBottom:"14px"}}>
+                  {([{k:"breakdown_prediction",l:"⚡ 崩壊予測",c:"#dc2626",bg:"#fff1f2"},{k:"interpersonal_dynamics",l:"👥 対人力学",c:"#0284c7",bg:"#f0f9ff"}] as {k:string;l:string;c:string;bg:string}[]).filter(({k})=>(profileResult as any)[k]).map(({k,l,c,bg})=>(
+                    <div key={k} style={{background:bg,borderLeft:`3px solid ${c}`,padding:"10px 12px",borderRadius:"0 8px 8px 0"}}>
+                      <p style={{fontSize:"9px",color:c,fontWeight:700,marginBottom:"3px"}}>{l}</p>
+                      <p style={{fontSize:"11px",color:"#111827",lineHeight:"1.5"}}>{(profileResult as any)[k]}</p>
+                    </div>
+                  ))}
+                </div>
+                {profileResult.analysis && Object.keys(profileResult.analysis as Record<string,string>).length>0 && (
+                  <div style={{marginBottom:"14px"}}>
+                    <p style={{fontSize:"10px",color:"#4f46e5",fontWeight:700,letterSpacing:"0.1em",marginBottom:"8px"}}>🔬 分析結果</p>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px"}}>
+                      {Object.entries(profileResult.analysis as Record<string,string>).map(([k,v])=>(
+                        <div key={k} style={{background:"#f8f9fc",borderRadius:"8px",padding:"10px",border:"1px solid rgba(0,0,0,0.06)"}}>
+                          <p style={{fontSize:"9px",color:"#6b7280",fontWeight:600,marginBottom:"3px"}}>{({"thinking_style":"思考傾向","behavioral_principle":"行動原理","emotional_trigger":"感情トリガー","interpersonal_risk":"対人リスク","strengths":"強み","weaknesses":"弱点","approach":"適した接し方","compatible_type":"相性良いタイプ","caution":"注意点","deep_desire":"深層欲求推定"} as Record<string,string>)[k]||k}</p>
+                          <p style={{fontSize:"11px",color:"#111827",lineHeight:"1.5"}}>{v}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {(profileResult as any).existence_os && Object.keys((profileResult as any).existence_os).some((k:string)=>(profileResult as any).existence_os[k]) && (
+                  <div style={{background:"linear-gradient(135deg,#0f172a,#1e1b4b)",borderRadius:"14px",padding:"14px 16px",marginBottom:"14px"}}>
+                    <p style={{fontSize:"9px",color:"rgba(255,255,255,0.45)",fontWeight:700,letterSpacing:"0.1em",marginBottom:"10px"}}>🧬 存在OSレポート</p>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px"}}>
+                      {([{k:"world_os",l:"🌐 世界OS"},{k:"self_os",l:"🪪 自己OS"},{k:"other_os",l:"👤 他者OS"},{k:"safety_os",l:"🔒 安全OS"},{k:"attachment_os",l:"💞 愛着OS"},{k:"value_os",l:"💎 価値OS"},{k:"dominance_os",l:"👑 支配OS"},{k:"collapse_os",l:"💥 崩壊OS"},{k:"creation_os",l:"✨ 創造OS"}] as {k:string;l:string}[]).filter(({k})=>(profileResult as any).existence_os?.[k]).map(({k,l})=>(
+                        <div key={k} style={{background:"rgba(255,255,255,0.06)",borderRadius:"8px",padding:"8px 10px",border:"1px solid rgba(255,255,255,0.1)"}}>
+                          <p style={{fontSize:"9px",color:"rgba(255,255,255,0.5)",fontWeight:700,marginBottom:"3px"}}>{l}</p>
+                          <p style={{fontSize:"11px",color:"rgba(255,255,255,0.88)",lineHeight:"1.5"}}>{(profileResult as any).existence_os[k]}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {(profileResult as any).structure_extraction && Object.keys((profileResult as any).structure_extraction).some((k:string)=>(profileResult as any).structure_extraction[k]) && (
+                  <div style={{background:"#fafafa",borderRadius:"14px",padding:"14px 16px",marginBottom:"14px",border:"1px solid rgba(0,0,0,0.07)"}}>
+                    <p style={{fontSize:"9px",color:"#7c3aed",fontWeight:700,letterSpacing:"0.1em",marginBottom:"10px"}}>🔍 構造抽出レポート</p>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px"}}>
+                      {([{k:"contradictions",l:"🔄 繰り返す矛盾"},{k:"obsessions",l:"🎯 執着"},{k:"anger_trigger",l:"⚡ 怒りポイント"},{k:"justification",l:"🛡️ 正義化構造"},{k:"silence_ignored",l:"🔇 沈黙・無視論点"},{k:"responsibility_position",l:"⚖️ 責任転嫁位置"},{k:"reality_interpretation",l:"🧬 現実解釈の構造"}] as {k:string;l:string}[]).filter(({k})=>(profileResult as any).structure_extraction?.[k]).map(({k,l})=>(
+                        <div key={k} style={{background:"#f3f0ff",borderRadius:"8px",padding:"8px 10px",border:"1px solid rgba(124,58,237,0.12)"}}>
+                          <p style={{fontSize:"9px",color:"#7c3aed",fontWeight:700,marginBottom:"3px"}}>{l}</p>
+                          <p style={{fontSize:"11px",color:"#111827",lineHeight:"1.5"}}>{(profileResult as any).structure_extraction[k]}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div style={{background:"#f0fdf4",borderRadius:"12px",padding:"14px",border:"1px solid rgba(34,197,94,0.2)"}}>
+                  <p style={{fontSize:"10px",color:"#16a34a",fontWeight:700,marginBottom:"6px"}}>📋 総合所見（安全確保アルゴリズムの構造）</p>
+                  <p style={{fontSize:"12px",color:"#111827",lineHeight:"1.6"}}>{profileResult.summary}</p>
+                </div>
+              </div>
+            )}
+            {profileResult && (
+            <div style={{background:"white",borderRadius:"16px",padding:"20px 24px",boxShadow:"0 4px 16px rgba(0,0,0,0.08)"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"14px"}}>
+                <p style={{fontWeight:800,fontSize:"14px",color:"#111827"}}>🔍 深掘り質問</p>
+                {!profileQuestions&&!profileQuestionsLoading&&(
+                  <button onClick={loadProfileQuestions} style={{fontSize:"12px",color:"#4f46e5",background:"none",border:"1px solid #4f46e5",borderRadius:"8px",padding:"4px 12px",cursor:"pointer",fontWeight:700}}>AI質問を生成</button>
+                )}
+              </div>
+              {profileQuestionsLoading&&<p style={{fontSize:"12px",color:"#6b7280",textAlign:"center",padding:"12px 0"}}>🔄 質問生成中...</p>}
+              {profileQuestions&&(
+                <div style={{marginBottom:"14px"}}>
+                  {(["危険系","活用系","関係系","深層系"] as string[]).map(cat=>(
+                    profileQuestions[cat]&&profileQuestions[cat].length>0&&(
+                      <div key={cat} style={{marginBottom:"10px"}}>
+                        <p style={{fontSize:"9px",fontWeight:700,color:"#6b7280",letterSpacing:"0.1em",marginBottom:"6px"}}>{{危険系:"⚡ 危険系",活用系:"✨ 活用系",関係系:"👥 関係系",深層系:"🧬 深層系"}[cat]}</p>
+                        <div style={{display:"flex",flexWrap:"wrap",gap:"6px"}}>
+                          {profileQuestions[cat].map((q:string,i:number)=>(
+                            <button key={i} onClick={()=>askProfileQuestion(q)} style={{fontSize:"11px",color:"#4f46e5",background:"#eef2ff",border:"1px solid rgba(99,102,241,0.2)",borderRadius:"20px",padding:"5px 12px",cursor:"pointer",textAlign:"left",lineHeight:"1.4"}}>{q}</button>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  ))}
+                </div>
+              )}
+              <div style={{display:"flex",gap:"8px",marginBottom:"10px"}}>
+                <input value={profileCustomQuestion} onChange={e=>setProfileCustomQuestion(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&profileCustomQuestion.trim())askProfileQuestion(profileCustomQuestion);}} placeholder="自由質問を入力..." style={{flex:1,background:"#f8f9fc",border:"1px solid rgba(0,0,0,0.1)",borderRadius:"10px",padding:"9px 12px",fontSize:"12px",color:"#111827"}} className="focus:outline-none"/>
+                <button onClick={()=>askProfileQuestion(profileCustomQuestion)} disabled={profileAnswerLoading||!profileCustomQuestion.trim()} style={{padding:"9px 16px",borderRadius:"10px",background:profileAnswerLoading||!profileCustomQuestion.trim()?"#e5e7eb":"#4f46e5",color:"white",fontWeight:700,fontSize:"12px",border:"none",cursor:profileAnswerLoading||!profileCustomQuestion.trim()?"not-allowed":"pointer",whiteSpace:"nowrap"}}>{profileAnswerLoading?"🔄":"質問する"}</button>
+              </div>
+              {profileAnswer&&(
+                <div style={{background:"#f0fdf4",borderRadius:"12px",padding:"14px 16px",border:"1px solid rgba(34,197,94,0.2)"}}>
+                  <p style={{fontSize:"9px",color:"#16a34a",fontWeight:700,marginBottom:"6px"}}>💬 {profileAnsweredQuestion}</p>
+                  <p style={{fontSize:"12px",color:"#111827",lineHeight:"1.7"}}>{profileAnswer}</p>
+                </div>
+              )}
+            </div>
+            )}
+            <div style={{background:"white",borderRadius:"16px",padding:"16px 20px",boxShadow:"0 2px 8px rgba(0,0,0,0.06)"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"12px"}}>
+                <h4 style={{fontWeight:700,fontSize:"13px",color:"#111827"}}>📋 過去のプロファイル</h4>
+                <button onClick={loadProfileHistory} style={{fontSize:"11px",color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>更新</button>
+              </div>
+              {profileHistory.length===0?(
+                <p style={{fontSize:"12px",color:"#9ca3af",textAlign:"center",padding:"12px 0"}}>履歴なし</p>
+              ):profileHistory.map(h=>(
+                <div key={h.doc_id} style={{padding:"10px 12px",borderRadius:"10px",border:"1px solid rgba(0,0,0,0.07)",marginBottom:"8px",background:"#f8f9fc"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"4px"}}>
+                    <div>
+                      <p style={{fontWeight:600,fontSize:"12px",color:"#111827"}}>{h.target_name}</p>
+                      <p style={{fontSize:"10px",color:"#9ca3af"}}>{(h.created_at||"").slice(0,16)}</p>
+                    </div>
+                    <div style={{display:"flex",gap:"4px"}}>
+                      <button onClick={()=>{if(h.result){setProfileResult(h.result);setProfileQuestions(null);setProfileAnswer("");setProfileAnsweredQuestion("");setProfileCustomQuestion("");setTimeout(()=>document.getElementById("profile-result-output")?.scrollIntoView({behavior:"smooth",block:"start"}),100);}}} style={{fontSize:"10px",color:"#4f46e5",background:"none",border:"1px solid #4f46e5",borderRadius:"6px",padding:"2px 7px",cursor:"pointer"}}>開く</button>
+                      <button onClick={()=>deleteProfile(h.doc_id)} style={{fontSize:"10px",color:"#ef4444",background:"none",border:"1px solid #ef4444",borderRadius:"6px",padding:"2px 7px",cursor:"pointer"}}>削除</button>
+                    </div>
+                  </div>
+                  <p style={{fontSize:"11px",color:"#6b7280",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{h.summary}</p>
+                </div>
+              ))}
             </div>
           </div>
         )}
