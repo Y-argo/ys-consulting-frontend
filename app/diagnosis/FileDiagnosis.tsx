@@ -1,6 +1,9 @@
 "use client";
 import React, { useState, useEffect, useRef } from "react";
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ||
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  "https://ys-consulting-api-665881683479.asia-northeast1.run.app";
 
 function toStr(v: any): string {
   if (v === null || v === undefined) return "";
@@ -171,7 +174,8 @@ export default function FileDiagnosis({C}: {C: any}) {
 
   // ファイルキー生成（ファイル名ベース）
   function getFileKey(f: File): string {
-    return f.name.replace(/[^a-zA-Z0-9_\-\.]/g, "_").slice(0,100);
+    const safeName = f.name.replace(/[^a-zA-Z0-9_\-\.]/g, "_").slice(0, 80);
+    return `${safeName}__${f.size}__${f.lastModified}`;
   }
 
   // Step1: ファイル選択→保存済みコンテキスト確認→スキャン開始
@@ -293,9 +297,8 @@ export default function FileDiagnosis({C}: {C: any}) {
     if (!currentToken) { console.error("[file_clarify_save] token未取得"); return; }
     const fileKey = getFileKey(file);
     const contextObj: any = {};
-    msgs.forEach((m,i)=>{
-      if (m.role==="user") contextObj[`Q${Math.floor(i/2)+1}`] = m.content;
-      else contextObj[`A${Math.floor(i/2)+1}`] = m.content;
+    msgs.filter(m=>m.role==="user").forEach((m,i)=>{
+      contextObj[`Q${i+1}`] = m.content;
     });
     contextObj["最終確認"] = lastAiMsg;
     try {
@@ -325,18 +328,19 @@ export default function FileDiagnosis({C}: {C: any}) {
       await saveContext(chatMsgs, "診断開始");
     }
 
-    // チャット内容をコンテキストとしてまとめる
-    const chatContext = chatMsgs
-      .map(m=>`${m.role==="ai"?"AI":"ユーザー"}: ${m.content}`)
+    // ユーザー回答のみ抽出（AI発言は除外）
+    const userOnlyContext = chatMsgs
+      .filter(m=>m.role==="user")
+      .map((m,i)=>`回答${i+1}: ${m.content}`)
       .join("\n");
-    // 保存済みコンテキストがある場合はそちらも含める
+    // 保存済みコンテキスト（Qキーのみ）
     const savedCtxStr = savedContext.found && savedContext.context
-      ? "\nユーザー（保存済み確認内容）: " + Object.entries(savedContext.context)
+      ? "\n保存済み確認回答:\n" + Object.entries(savedContext.context)
           .filter(([k])=>k.startsWith("Q"))
           .map(([k,v])=>`${k}: ${v}`)
-          .join("\nユーザー: ")
+          .join("\n")
       : "";
-    const answerContext = chatContext + savedCtxStr;
+    const answerContext = [userOnlyContext, savedCtxStr].filter(Boolean).join("\n");
 
     try {
       const form = new FormData();
@@ -373,7 +377,20 @@ export default function FileDiagnosis({C}: {C: any}) {
       const res = await fetch(`${API_BASE}/api/diagnosis/file_followup`, {
         method:"POST",
         headers: {Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
-        body: JSON.stringify({question:followUp, context:JSON.stringify(result), filename:result.filename||""}),
+        body: JSON.stringify({question:followUp, context:(()=>{
+          const toStr=(v: any):string=>typeof v==="string"?v:v?JSON.stringify(v,null,2):"";
+          return [
+            `ファイル名: ${result.filename||""}`,
+            `シート: ${(result.sheets||[]).join(", ")}`,
+            `現状把握:\n${toStr(result.overview)}`,
+            `構造診断:\n${toStr(result.structure)}`,
+            `課題仮説:\n${toStr(result.issues)}`,
+            `実行計画:\n${toStr(result.action_plan)}`,
+            `重要指標:\n${toStr(result.key_metrics)}`,
+            `リスク:\n${toStr(result.risks)}`,
+            `数値分析:\n${toStr(result.numeric_analysis)}`,
+          ].join("\n\n");
+        })(), filename:result.filename||""}),
       });
       if (!res.ok) throw new Error("追加分析失敗");
       const d = await res.json();

@@ -13,6 +13,7 @@ import {
   tableCommand, lgbmPredict, TableResult,
   Message, SessionInfo, UserStats, AttachmentResult, ThemeConfig,
   getUserAiSettings,
+  getNotifications, markAllNotificationsRead,
 } from "@/lib/api";
 import AdBanner from "@/components/AdBanner";
 
@@ -67,6 +68,10 @@ export default function ChatPage() {
   const [conversationStarters, setConversationStarters] = useState<string[]>([]);
   const [apexEnabled, setApexEnabled] = useState(false);
   const [hasInvestSignal, setHasInvestSignal] = useState(false);
+  const [imageGenerationEnabled, setImageGenerationEnabled] = useState(false);
+  const [decisionMetricsEnabled, setDecisionMetricsEnabled] = useState(true);
+  const [displaySuggestions, setDisplaySuggestions] = useState(true);
+  const [displayScore, setDisplayScore] = useState(true);
   const [stats, setStats] = useState<UserStats|null>(null);
   const [currentPlan, setCurrentPlan] = useState<string>("");
   const [usageLogs, setUsageLogs] = useState<{prompt:string;timestamp:string}[]>([]);
@@ -80,6 +85,8 @@ export default function ChatPage() {
   const [headerCfg, setHeaderCfg] = useState<Record<string,string>>({});
   const [leftOpen, setLeftOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeConfig|null>(null);
+  const [notifBanner, setNotifBanner] = useState<Array<{notif_id:string;title:string;body:string;link_tab:string}>>([]);
+  const [notifUnread, setNotifUnread] = useState(0);
   const [editingId, setEditingId] = useState<string|null>(null);
   const [scoreDelta, setScoreDelta] = useState<number|null>(null);
   const [editVal, setEditVal] = useState("");
@@ -111,6 +118,10 @@ export default function ChatPage() {
     const savedMode = localStorage.getItem("ascend_chat_mode");
     const savedModeBar = localStorage.getItem("ascend_display_mode_bar");
     if (savedModeBar !== null) setDisplayModeBar(savedModeBar === "true");
+    const savedSugg = localStorage.getItem("ascend_display_suggestions");
+    if (savedSugg !== null) setDisplaySuggestions(savedSugg === "true");
+    const savedScore = localStorage.getItem("ascend_display_score");
+    if (savedScore !== null) setDisplayScore(savedScore === "true");
     if (savedMode === "talk" || savedMode === "consult") setChatMode(savedMode);
     setLeftOpen(window.innerWidth >= 768);
     const user = getStoredUser();
@@ -136,6 +147,8 @@ export default function ChatPage() {
       setUltraEnabled(hasUltra);
       setApexEnabled(hasApex);
       setHasInvestSignal(!!f.diag_investment);
+      setImageGenerationEnabled(!!f.image_generation);
+      setDecisionMetricsEnabled(f.decision_metrics!==false);
       const savedTier = localStorage.getItem("ascend_ai_tier_default");
       if (savedTier === "ultra" && hasUltra) setAiTier("ultra");
       else if (savedTier === "apex" && hasApex) setAiTier("apex");
@@ -157,6 +170,11 @@ export default function ChatPage() {
     });
     getChatExamples().then(setChatExamples);
     getPurposeModes().then(setPurposeModesData);
+    getNotifications().then(list=>{
+      const unread = list.filter(n=>!n.read);
+      setNotifUnread(unread.length);
+      setNotifBanner(unread.slice(0,3).map(n=>({notif_id:n.notif_id,title:n.title,body:n.body,link_tab:n.link_tab})));
+    });
 
   }, []);
 
@@ -211,15 +229,47 @@ export default function ChatPage() {
     };
     setAttachment(null);
     setMessages(p=>[...p, userMsg]);
+
+    const _blockedImageReq =
+      (/画像|イメージ|イラスト|ロゴ|アイコン|バナー|描いて|作って/i.test(text))
+      && !imageGenerationEnabled;
+
+    if (_blockedImageReq) {
+      setMessages(p => [
+        ...p,
+        {
+          id:`a_${Date.now()}`,
+          role:"assistant",
+          content:"画像生成は現在未開放のため使用できません。"
+        }
+      ]);
+      return;
+    }
+
+    const sendText = text;
+    const _isImgAttach = !!attachment && /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(attachment.filename||"");
+    const _isFileReq2 = !!attachment && !_isImgAttach;
+    const _lastGeneratedImage = [...messages].reverse().find(m => Array.isArray(m.images) && m.images.length > 0)?.images?.[0] as any;
+    const _isImageEditReq2 =
+      !!_lastGeneratedImage?.data &&
+      /編集|修正|変更|変えて|変える|色|背景|追加|削除|除去|切り取|合成|スタイル|明る|暗く|文字|テキスト|ロゴ|ここ|この部分|ここの/i.test(sendText);
+    const _isNewImageReq2 =
+      /画像|イメージ|イラスト|絵|写真|ロゴ|アイコン|バナー|デザイン|ビジュアル|描いて|作って|生成|作成|image|picture|photo|illustration|logo|banner|design|visual|draw|create|generate/i.test(sendText);
+    const _isImageReq2 = _isImgAttach || _isImageEditReq2 || _isNewImageReq2;
+    const _isInvestReq2 = /投資|銘柄|株|相場|シグナル|GOAL_BOTTOM|WATCH|底打ち|反発|買い|売り/i.test(sendText);
+
     setLoading(true);
     setLoadingStep(0);
-    const _stepTimer = setInterval(()=>{setLoadingStep(s=>Math.min(s+1,5));setLoadingLabel("");},600);
+    setLoadingLabel(_isImageReq2 ? "プロンプトを設計中..." : "");
+    const _imageLoadingLabels = ["プロンプトを設計中...","画像を生成中...","品質を検証中...","出力を最適化中...","仕上げ中...","仕上げ中..."];
+    const _stepTimer = setInterval(()=>{
+      setLoadingStep(s=>{
+        const n = Math.min(s+1,5);
+        setLoadingLabel(_isImageReq2 ? (_imageLoadingLabels[n] || "画像を生成中...") : "");
+        return n;
+      });
+    },600);
     try {
-      const sendText = text;
-      const _isImgAttach = !!attachment && /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(attachment.filename||"");
-      const _isFileReq2 = !!attachment && !_isImgAttach;
-      const _isImageReq2 = _isImgAttach || (/画像|イメージ|イラスト|ロゴ|アイコン|バナー|描いて|作って/i.test(sendText) && !/解析|分析|読んで|リスト|一覧|手順|やること/.test(sendText));
-      const _isInvestReq2 = /投資|銘柄|株|相場|シグナル|GOAL_BOTTOM|WATCH|底打ち|反発|買い|売り/i.test(sendText);
       let res;
       const _onStep = (label: string) => { clearInterval(_stepTimer); const _sm: Record<string,number> = {"入力を解析中...":0,"意図を特定中...":1,"ナレッジを検索中...":2,"専用ナレッジを検索中...":2,"回答を構築中...":3,"構造を解析中...":4,"回答を整形中...":5,"最終調整中...":5,"ファイルを受信中...":0,"内容を解析中...":1,"構造を把握中...":2,"インサイトを生成中...":3,"画像を受信中...":0,"画像を解析中...":1,"内容を把握中...":2,"インサイトを抽出中...":3,"プロンプトを設計中...":1,"画像を生成中...":2,"品質を検証中...":3,"出力を最適化中...":4,"仕上げ中...":5}; const _si = _sm[label]; if (_si !== undefined) setLoadingStep(_si); setLoadingLabel(label); };
       if (_isFileReq2 && attachment) {
@@ -232,6 +282,9 @@ export default function ChatPage() {
           const _parts = attachment.extracted_text.split(":");
           _imgMime = _parts[1];
           _imgB64 = _parts.slice(2).join(":");
+        } else if (_isImageEditReq2 && _lastGeneratedImage?.data) {
+          _imgMime = _lastGeneratedImage.mime_type || "image/png";
+          _imgB64 = _lastGeneratedImage.data;
         }
         const { sendImageMessageStream } = await import("@/lib/api");
         res = await sendImageMessageStream(sendText, chatId, aiTier, _imgB64, _imgMime, _onStep);
@@ -292,7 +345,7 @@ export default function ChatPage() {
     setLoadingStep(0);
     const _stepTimer = setInterval(()=>{setLoadingStep(s=>Math.min(s+1,5));setLoadingLabel("");},600);
     try {
-      const _isImageReq2 = /画像|イメージ|イラスト|ロゴ|アイコン|バナー|描いて|作って/i.test(text) && !/解析|分析|読んで|リスト|一覧|手順|やること/.test(text);
+      const _isImageReq2 = /画像|イラスト|絵|写真|生成|作成|描いて|デザイン|ビジュアル|visual|image|picture|photo|illustration|generate|create|draw/i.test(text);
       const _isInvestReq2 = /投資|銘柄|株|相場|シグナル|GOAL_BOTTOM|WATCH|底打ち|反発|買い|売り/i.test(text);
       let res;
       const _onStep2 = (label: string) => { clearInterval(_stepTimer); const _sm: Record<string,number> = {"入力を解析中...":0,"意図を特定中...":1,"ナレッジを検索中...":2,"専用ナレッジを検索中...":2,"回答を構築中...":3,"構造を解析中...":4,"回答を整形中...":5,"最終調整中...":5}; const _si = _sm[label]; if (_si !== undefined) setLoadingStep(_si); setLoadingLabel(label); };
@@ -413,7 +466,7 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden" style={{background:C.bg, fontFamily:"'Inter','Noto Sans JP',sans-serif", color:C.textMain}}>
+    <div className="flex flex-col h-[100dvh] overflow-hidden" style={{background:C.bg, fontFamily:"'Inter','Noto Sans JP',sans-serif", color:C.textMain}}>
       {/* NAV */}
       <nav style={{background:C.nav, borderBottom:`1px solid ${C.border}`, backdropFilter:"blur(12px)", boxShadow:C.shadow}} className="flex-shrink-0 z-10">
         {/* 1行目: ASCEND（左）サブタイトル（中央）☰（右） */}
@@ -454,6 +507,28 @@ export default function ChatPage() {
         </div>
       </nav>
 
+      {/* 通知バナー */}
+      {notifBanner.length>0&&(
+        <div style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,padding:"6px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:"8px",flexShrink:0}}>
+          <div style={{flex:1,overflow:"hidden"}}>
+            <p style={{color:"white",fontSize:"11px",fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+              🔔 {notifBanner[0].title}
+            </p>
+            <p style={{color:"rgba(255,255,255,0.8)",fontSize:"10px",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{notifBanner[0].body}</p>
+          </div>
+          <div style={{display:"flex",gap:"6px",flexShrink:0}}>
+            <button onClick={()=>router.push("/mypage?tab=notifications")} style={{background:"rgba(255,255,255,0.2)",border:"1px solid rgba(255,255,255,0.4)",borderRadius:"8px",color:"white",fontSize:"10px",fontWeight:700,padding:"3px 10px",cursor:"pointer"}}>
+              確認する
+            </button>
+            <button onClick={async()=>{
+              await markAllNotificationsRead();
+              setNotifBanner([]);
+              setNotifUnread(0);
+            }} style={{background:"none",border:"none",color:"rgba(255,255,255,0.7)",fontSize:"14px",cursor:"pointer",padding:"0 4px"}}>✕</button>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-1 overflow-hidden">
 
         {/* LEFT SIDEBAR */}
@@ -468,7 +543,7 @@ export default function ChatPage() {
               </button>
 
               {/* ランクスコア プレミアム */}
-              {stats && (() => {
+              {stats && displayScore && (() => {
                 const rankColors: Record<string,{bg:string,border:string,text:string,badge:string}> = {
                   default:{bg:"linear-gradient(135deg,#f8f9fc,#f1f2f6)",border:"rgba(0,0,0,0.1)",text:"#374151",badge:"linear-gradient(135deg,#6b7280,#9ca3af)"},
                 };
@@ -517,7 +592,7 @@ export default function ChatPage() {
                 );
               })()}
             </div>
-            {dm && (() => {
+            {dm && decisionMetricsEnabled && (() => {
               const rank = String(dm.diagnosis_rank||"C");
               const rankGrad = rank==="S"?"linear-gradient(135deg,#f59e0b,#ef4444)":rank.startsWith("A")?"linear-gradient(135deg,#6366f1,#8b5cf6)":rank.startsWith("B")?"linear-gradient(135deg,#3b82f6,#06b6d4)":"linear-gradient(135deg,#6b7280,#9ca3af)";
               const dims = [
@@ -799,12 +874,13 @@ export default function ChatPage() {
                                   ))}
                                 </div>
                               );
+                              return null;
                             }
                           } catch {}
                           // 構造化カードUI
-                          if (m.structured) {
+                          if (m.structured && typeof (m.structured as any).summary === 'string' && (m.structured as any).analysis) {
                             const _s = m.structured as {summary:string;cards:any;question_type?:string;analysis:{type:string;urgency:string;importance:string;mode:string};actions:string[];value_message:string};
-                            const _cl_cards:Array<{title:string;items:string[];color:string}> = Array.isArray(_s.cards)?_s.cards.map((c:{title:string;items:string[]},i:number)=>({title:c.title,items:c.items||[],color:["#0891b2","#dc2626","#059669","#6366f1","#d97706"][i%5]})):[{title:"現状整理",items:_s.cards?.current||[],color:"#0891b2"},{title:"問題・リスク",items:_s.cards?.risk||[],color:"#dc2626"},{title:"推奨方針",items:_s.cards?.plan||[],color:"#059669"}];
+                            const _cl_cards:Array<{title:string;items:string[];color:string}> = Array.isArray(_s.cards)?_s.cards.map((c:{title:string;items:string[]},i:number)=>({title:c.title,items:c.items||[],color:["#0891b2","#dc2626","#059669","#6366f1","#d97706"][i%5]})):[{title:"現状整理",items:(Array.isArray(_s.cards?.current)?_s.cards.current:[]).map((x:unknown)=>typeof x==="string"?x:JSON.stringify(x)),color:"#0891b2"},{title:"問題・リスク",items:(Array.isArray(_s.cards?.risk)?_s.cards.risk:[]).map((x:unknown)=>typeof x==="string"?x:JSON.stringify(x)),color:"#dc2626"},{title:"推奨方針",items:(Array.isArray(_s.cards?.plan)?_s.cards.plan:[]).map((x:unknown)=>typeof x==="string"?x:JSON.stringify(x)),color:"#059669"}];
                             const _modeColor: Record<string,string> = {NUMERIC:"#059669",STRATEGY:"#6366f1",CONTROL:"#0891b2",RISK:"#dc2626",MARKETING:"#db2777",GROWTH:"#d97706",DIAGNOSIS:"#7c3aed",PLANNING:"#0891b2",FORECAST:"#475569",FINANCE:"#059669",HR:"#d97706",CREATIVE:"#db2777",NEGOTIATION:"#dc2626",AUTO:"#6366f1"};
                             const _mc = _modeColor[(_s.analysis?.mode||"").toUpperCase()]||"#6366f1";
                             const _isFinance = (_s.analysis?.mode||"").toUpperCase()==="FINANCE";
@@ -907,9 +983,9 @@ export default function ChatPage() {
                             );
                           }
                           // 構造化カードUI
-                          if (m.structured) {
+                          if (m.structured && typeof (m.structured as any).summary === 'string' && (m.structured as any).analysis) {
                             const _s = m.structured as {summary:string;cards:any;question_type?:string;analysis:{type:string;urgency:string;importance:string;mode:string};actions:string[];value_message:string};
-                            const _cl_cards:Array<{title:string;items:string[];color:string}> = Array.isArray(_s.cards)?_s.cards.map((c:{title:string;items:string[]},i:number)=>({title:c.title,items:c.items||[],color:["#0891b2","#dc2626","#059669","#6366f1","#d97706"][i%5]})):[{title:"現状整理",items:_s.cards?.current||[],color:"#0891b2"},{title:"問題・リスク",items:_s.cards?.risk||[],color:"#dc2626"},{title:"推奨方針",items:_s.cards?.plan||[],color:"#059669"}];
+                            const _cl_cards:Array<{title:string;items:string[];color:string}> = Array.isArray(_s.cards)?_s.cards.map((c:{title:string;items:string[]},i:number)=>({title:c.title,items:c.items||[],color:["#0891b2","#dc2626","#059669","#6366f1","#d97706"][i%5]})):[{title:"現状整理",items:(Array.isArray(_s.cards?.current)?_s.cards.current:[]).map((x:unknown)=>typeof x==="string"?x:JSON.stringify(x)),color:"#0891b2"},{title:"問題・リスク",items:(Array.isArray(_s.cards?.risk)?_s.cards.risk:[]).map((x:unknown)=>typeof x==="string"?x:JSON.stringify(x)),color:"#dc2626"},{title:"推奨方針",items:(Array.isArray(_s.cards?.plan)?_s.cards.plan:[]).map((x:unknown)=>typeof x==="string"?x:JSON.stringify(x)),color:"#059669"}];
                             const _modeColor: Record<string,string> = {NUMERIC:"#059669",STRATEGY:"#6366f1",CONTROL:"#0891b2",RISK:"#dc2626",MARKETING:"#db2777",GROWTH:"#d97706",DIAGNOSIS:"#7c3aed",PLANNING:"#0891b2",FORECAST:"#475569",FINANCE:"#059669",HR:"#d97706",CREATIVE:"#db2777",NEGOTIATION:"#dc2626",AUTO:"#6366f1"};
                             const _mc = _modeColor[(_s.analysis?.mode||"").toUpperCase()]||"#6366f1";
                             return (
@@ -1073,7 +1149,7 @@ export default function ChatPage() {
                     ))}
                   </div>
                 )}
-                {m.role==="assistant" && Array.isArray(m.suggestions) && m.suggestions.length>0 && (
+                {m.role==="assistant" && Array.isArray(m.suggestions) && m.suggestions.length>0 && displaySuggestions && (
                   <div className="ml-11 mt-2 space-y-1.5">
                     <p className="text-xs mb-1.5" style={{color: C.primary}}>💡 次に想定される事案</p>
                     {m.suggestions.map((q,qi)=>(
@@ -1179,6 +1255,7 @@ export default function ChatPage() {
               {id:"COACHING",  label:"COACHING",  color:"#0891b2", keywords:["コーチング","自己","内省","気づき","変革","マインド","思考パターン"]},
               {id:"OPS",       label:"OPS",       color:"#0f766e", keywords:["業務","オペレーション","効率","工数","標準化","自動化","改善","無駄","ボトルネック","フロー整理","作業","手作業","システム化","デジタル化","DX","省力化","時短","生産性"]},
               {id:"TECH",      label:"TECH",      color:"#1d4ed8", keywords:["技術","エンジニア","システム","アーキテクチャ","実装","API","DB","インフラ","開発","コード","プログラム","ソフトウェア","ハードウェア","クラウド","サーバー","セキュリティ","バグ","エラー"]},
+              {id:"ASCEND",    label:"ASCEND",    color:"#6366f1", keywords:["ASCENDとは","ASCEND","使い方","機能","プロファイル生成","顧客AIマネジメント","画像生成とは","プレゼン資料生成","未来分岐シミュレーター","ファイル診断","固定概念レポート","ランクシステム","何ができ","プランは","料金は","Decision Metrics","個人相談","投資シグナル","構造診断","課題仮説","矛盾検知","比較分析","思考マップ","このシステム","このAI"]},
             ];
             if (input.trim().length < 2) return null;
             const _txt = input.toLowerCase();

@@ -5,16 +5,17 @@ import dynamic from "next/dynamic";
 const ReactMarkdown = dynamic(() => import("react-markdown"), { ssr: false, loading: () => null });
 const FileDiagnosis = dynamic(() => import("./FileDiagnosis"), { ssr: false, loading: () => null });
 const PresentationTool = dynamic(() => import("../mypage/PresentationTool"), { ssr: false, loading: () => null });
+const CustomerManagement = dynamic(() => import("./CustomerManagement"), { ssr: false, loading: () => null });
 import { getStoredUser, getUserStats, UserStats, getMyFeatures } from "@/lib/api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL || "https://ys-consulting-api-665881683479.asia-northeast1.run.app";
 
 function authHeaders(): HeadersInit {
   const token = typeof window !== "undefined" ? localStorage.getItem("ascend_token") || "" : "";
   return token ? { "Content-Type": "application/json", Authorization: `Bearer ${token}` } : { "Content-Type": "application/json" };
 }
 
-type TabId = "diagnosis"|"structure"|"issue"|"comparison"|"contradiction"|"execution"|"investment"|"graph"|"file"|"presentation"|"future"|"profile";
+type TabId = "diagnosis"|"structure"|"issue"|"comparison"|"contradiction"|"execution"|"investment"|"graph"|"file"|"presentation"|"future"|"profile"|"crm";
 
 const C = {
   bg:"#f8f9fc", card:"#ffffff", primary:"#4f46e5", primary2:"#7c3aed",
@@ -29,6 +30,7 @@ function DiagnosisPageInner() {
   const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
   const [tab, setTab] = useState<TabId>("diagnosis");
+  const [tabMenuOpen, setTabMenuOpen] = useState(false);
   const graphRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState("");
@@ -61,6 +63,8 @@ function DiagnosisPageInner() {
   const [profileResult, setProfileResult] = useState<any>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileHistory, setProfileHistory] = useState<{doc_id:string;target_name:string;created_at:string;summary:string;result?:any}[]>([]);
+  const [issueHistory, setIssueHistory] = useState<any[]>([]);
+  const [structureHistory, setStructureHistory] = useState<any[]>([]);
   const [profileError, setProfileError] = useState("");
   const [profileQuestions, setProfileQuestions] = useState<Record<string,string[]>|null>(null);
   const [profileQuestionsLoading, setProfileQuestionsLoading] = useState(false);
@@ -68,6 +72,7 @@ function DiagnosisPageInner() {
   const [profileAnswerLoading, setProfileAnswerLoading] = useState(false);
   const [profileCustomQuestion, setProfileCustomQuestion] = useState("");
   const [profileAnsweredQuestion, setProfileAnsweredQuestion] = useState("");
+  const [profileGuideOpen, setProfileGuideOpen] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -270,11 +275,15 @@ function DiagnosisPageInner() {
     setLoading(true); setError(""); setConsultResult(null); setActiveAnalysisType(analysisType);
     try {
       const body = { analysis_type:analysisType, input_text:getInput(analysisType), supplement, options, strategy, policy };
-      const res = await fetch(`${API_BASE}/api/diagnosis/consult`, { method:"POST", headers:authHeaders(), body:JSON.stringify(body) });
+      const _ctrl = new AbortController();
+      const _timer = setTimeout(()=>_ctrl.abort(), 180000);
+      let res: Response;
+      try { res = await fetch(`${API_BASE}/api/diagnosis/consult`, { method:"POST", headers:authHeaders(), body:JSON.stringify(body), signal:_ctrl.signal }); } finally { clearTimeout(_timer); }
       if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail||"エラー"); }
       const d = await res.json();
       if (!d.ok) throw new Error(d.error||"エラー");
       setConsultResult(d.result);
+      if(analysisType==="issue"){ loadIssueHistory(); }
       // 履歴更新
       const h = await fetch(`${API_BASE}/api/diagnosis/consult/history?analysis_type=${analysisType}`, { headers:authHeaders() });
       if (h.ok) { const hd = await h.json(); setConsultHistory(hd.analyses||[]); }
@@ -294,12 +303,37 @@ function DiagnosisPageInner() {
   const [futureLoading, setFutureLoading] = useState(false);
   const [futureError, setFutureError] = useState("");
   const [futureHistory, setFutureHistory] = useState<any[]>([]);
+  const [reviewTarget, setReviewTarget] = useState<any>(null);
+  const [reviewInput, setReviewInput] = useState<any>({actual_outcome:"",actual_success_level:50,actual_risk:"中",actual_state:""});
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewResult, setReviewResult] = useState<any>(null);
   const loadProfileHistory = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/diagnosis/profile_list`, {headers:authHeaders()});
       const data = await res.json();
       if(data.profiles) setProfileHistory(data.profiles);
     } catch(e){}
+  };
+  const loadStructureHistory = async () => {
+    try{
+      const res = await fetch(`${API_BASE}/api/diagnosis/consult/history?analysis_type=structure`,{headers:authHeaders()});
+      const data = await res.json();
+      if(data.analyses){ setStructureHistory(data.analyses.slice(0,20)); }
+    }catch(e){}
+  };
+  const deleteStructureAnalysis = async (doc_id:string) => {
+    if(!confirm("この構造診断を削除しますか？")) return;
+    try{
+      await fetch(`${API_BASE}/api/diagnosis/consult/delete/${doc_id}`,{method:"DELETE",headers:authHeaders()});
+      setStructureHistory(prev=>prev.filter(h=>h.doc_id!==doc_id));
+    }catch(e){}
+  };
+  const loadIssueHistory = async () => {
+    try{
+      const res = await fetch(`${API_BASE}/api/diagnosis/issue_list`,{headers:authHeaders()});
+      const data = await res.json();
+      if(data.reports){ setIssueHistory(data.reports); }
+    }catch(e){}
   };
   const loadFutureHistory = async () => {
     const token = localStorage.getItem("ascend_token") || "";
@@ -415,6 +449,108 @@ function DiagnosisPageInner() {
     h+="<script>window.print();<\/script></body></html>";
     w.document.write(h); w.document.close();
   };
+  const handleIssuePrint = () => {
+    if(!consultResult || activeAnalysisType!=="issue") return;
+    const r = consultResult as any;
+    const w = window.open("","_blank");
+    if(!w) return;
+    let h='<!DOCTYPE html><html><head><meta charset="utf-8"><title>課題仮説レポート</title>';
+    h+='<style>';
+    h+='body{font-family:sans-serif;max-width:1100px;margin:30px auto;padding:24px;color:#111;background:#fff;}';
+    h+='h1{font-size:30px;font-weight:900;margin-bottom:8px;color:#1e1b4b;}';
+    h+='h2{font-size:22px;font-weight:800;color:#4c1d95;margin:28px 0 10px;border-bottom:2px solid #e5e7eb;padding-bottom:6px;}';
+    h+='.card{border:1px solid #d1d5db;border-radius:12px;padding:18px;margin-bottom:14px;background:#fafafa;}';
+    h+='.txt{font-size:18px;line-height:2.0;color:#111;}';
+    h+='.mini{font-size:16px;color:#374151;font-weight:700;margin-bottom:4px;}';
+    h+='.pill{display:inline-block;padding:4px 10px;border-radius:999px;font-size:15px;font-weight:700;margin-right:6px;margin-bottom:6px;background:#ede9fe;color:#4c1d95;border:1px solid #c4b5fd;}';
+    h+='.chain{padding:14px;border-radius:12px;background:#f0f9ff;border:1px solid #bae6fd;margin-bottom:12px;}';
+    h+='.chain .mini{color:#1e40af;}';
+    h+='ul{padding-left:24px;}';
+    h+='li{margin-bottom:10px;font-size:18px;line-height:1.9;color:#111;}';
+    h+='@media print{button{display:none;}}';
+    h+='</style></head><body>';
+    h+='<h1>🎯 課題仮説レポート</h1>';
+    if(r.issue_summary){
+      h+='<div class="card"><div class="txt">'+String(r.issue_summary)+'</div></div>';
+    }
+    if(Array.isArray(r.main_issues)&&r.main_issues.length){
+      h+='<h2>主要論点</h2><ul>';
+      r.main_issues.forEach((x:string)=>{h+='<li>'+x+'</li>';});
+      h+='</ul>';
+    }
+    if(Array.isArray(r.hypotheses)&&r.hypotheses.length){
+      h+='<h2>課題仮説</h2>';
+      r.hypotheses.forEach((hyp:any,i:number)=>{
+        h+='<div class="card">';
+        h+='<div style="font-size:24px;font-weight:900;margin-bottom:10px;color:#1e1b4b;">'+(i+1)+'. '+String(hyp.title||'仮説')+'</div>';
+        if(hyp.priority){h+='<span class="pill">優先度: '+String(hyp.priority)+'</span>';}
+        if(hyp.confidence){h+='<span class="pill">確度: '+String(hyp.confidence)+'</span>';}
+        if(typeof hyp.verification_score==="number"){h+='<span class="pill">検証可能性: '+Math.round(Number(hyp.verification_score||0)*100)+'%</span>';}
+        if(hyp.description){h+='<div class="txt" style="margin-top:14px;">'+String(hyp.description)+'</div>';}
+        const fields=[
+          ["根拠",hyp.evidence?.join(" / ")],
+          ["影響",hyp.expected_impact],
+          ["検証",hyp.verification_method],
+          ["必要データ",hyp.required_data?.join(" / ")],
+          ["反証条件",hyp.falsification_condition],
+          ["初手",hyp.first_action],
+          ["優先理由",hyp.priority_reason]
+        ];
+        fields.forEach(([label,val])=>{
+          if(val){
+            h+='<div style="margin-top:14px;">';
+            h+='<div class="mini">'+label+'</div>';
+            h+='<div class="txt">'+String(val)+'</div>';
+            h+='</div>';
+          }
+        });
+        h+='</div>';
+      });
+    }
+    if(Array.isArray(r.root_issues)&&r.root_issues.length){
+      h+='<h2>🔴 根本課題</h2><ul>';
+      r.root_issues.forEach((x:string)=>h+='<li style="color:#991b1b;">'+x+'</li>');
+      h+='</ul>';
+    }
+    if(Array.isArray(r.surface_issues)&&r.surface_issues.length){
+      h+='<h2>🟡 表面的課題</h2><ul>';
+      r.surface_issues.forEach((x:string)=>h+='<li style="color:#92400e;">'+x+'</li>');
+      h+='</ul>';
+    }
+    if(Array.isArray(r.causal_chains)&&r.causal_chains.length){
+      h+='<h2>🔗 因果連鎖</h2>';
+      r.causal_chains.forEach((c:any)=>{
+        h+='<div class="chain">';
+        if(c.root){h+='<div class="mini">ROOT</div><div class="txt" style="color:#991b1b;">'+String(c.root)+'</div>';}
+        if(c.mechanism){h+='<div class="mini" style="margin-top:10px;">MECHANISM</div><div class="txt" style="color:#1e40af;">'+String(c.mechanism)+'</div>';}
+        if(c.symptom){h+='<div class="mini" style="margin-top:10px;">SYMPTOM</div><div class="txt" style="color:#92400e;">'+String(c.symptom)+'</div>';}
+        if(c.business_impact){h+='<div class="mini" style="margin-top:10px;">IMPACT</div><div class="txt" style="color:#065f46;">'+String(c.business_impact)+'</div>';}
+        h+='</div>';
+      });
+    }
+    if(r.top_hypothesis||r.priority_reason){
+      h+='<h2>⭐ 最重要仮説</h2>';
+      h+='<div class="card">';
+      if(r.top_hypothesis){h+='<div style="font-size:24px;font-weight:900;margin-bottom:12px;color:#1e1b4b;">'+String(r.top_hypothesis)+'</div>';}
+      if(r.priority_reason){h+='<div class="txt">'+String(r.priority_reason)+'</div>';}
+      h+='</div>';
+    }
+    const listSections=[
+      ["❓ 不足情報",r.missing_information],
+      ["✅ 次に確認すべき質問",r.questions_to_verify],
+      ["🎯 意思決定ポイント",r.decision_points]
+    ];
+    listSections.forEach(([title,arr])=>{
+      if(Array.isArray(arr)&&(arr as string[]).length){
+        h+='<h2>'+title+'</h2><ul>';
+        (arr as string[]).forEach((x:string)=>h+='<li>'+x+'</li>');
+        h+='</ul>';
+      }
+    });
+    h+='<script>window.print();<\/script></body></html>';
+    w.document.write(h);
+    w.document.close();
+  };
   const loadProfileQuestions = async () => {
     if(!profileResult) return;
     setProfileQuestionsLoading(true);
@@ -442,7 +578,7 @@ function DiagnosisPageInner() {
     } catch(e){} finally{setProfileAnswerLoading(false);setProfileCustomQuestion("");}
   };
     const allTabs: {id:TabId;label:string;flag?:string}[] = [
-    {id:"diagnosis",label:"🔬 現状課題診断"},
+    ...(features?.current_issue_diagnosis!==false ? [{id:"diagnosis" as TabId,label:"🔬 現状課題診断"}] : []),
     {id:"structure",label:"🏗️ 構造診断",flag:"diag_structure"},
     {id:"issue",label:"🎯 課題仮説",flag:"diag_issue"},
     {id:"comparison",label:"⚖️ 比較分析",flag:"diag_comparison"},
@@ -454,8 +590,23 @@ function DiagnosisPageInner() {
     {id:"presentation",label:"📊 プレゼン資料",flag:"diag_presentation"},
     {id:"future",label:"🔮 未来分岐シミュレーター",flag:"diag_future"},
     {id:"profile",label:"🕵️ プロファイル生成",flag:"diag_profile"},
+    {id:"crm",label:"👥 顧客AIマネジメント",flag:"diag_crm"},
   ];
   const TABS = allTabs.filter(t=>!t.flag || (featuresLoaded && features[t.flag] === true));
+  useEffect(()=>{
+    if(featuresLoaded && TABS.length>0 && !TABS.find(t=>t.id===tab)){
+      setTab(TABS[0].id);
+      if(typeof window!=="undefined") localStorage.setItem("diag_tab",TABS[0].id);
+    }
+  },[featuresLoaded]);
+  useEffect(()=>{
+    if(tab==="issue"){
+      loadIssueHistory();
+    }
+    if(tab==="structure"){
+      loadStructureHistory();
+    }
+  },[tab]);
 
   const renderConsultResult = () => {
     if (!consultResult) return null;
@@ -472,9 +623,14 @@ function DiagnosisPageInner() {
 
     // structure
     if (activeAnalysisType==="structure") return (
-      <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",boxShadow:C.shadowMd}} className="p-5 mt-4">
-        <p style={{color:C.primary,fontWeight:900,fontSize:"15px",marginBottom:"16px"}}>🏗️ 構造診断レポート</p>
+      <div id="structure-report-print" style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",boxShadow:C.shadowMd}} className="p-5 mt-4">
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px"}}>
+          <p style={{color:C.primary,fontWeight:900,fontSize:"15px"}}>🏗️ 構造診断レポート</p>
+          <button onClick={()=>window.print()} style={{padding:"8px 16px",borderRadius:"10px",background:"#4f46e5",color:"white",fontWeight:700,fontSize:"12px",border:"none",cursor:"pointer"}}>🖨️ 印刷・保存</button>
+        </div>
+
         {r.issue_summary && <Section title="問題サマリー" color={C.primary}><p style={{color:C.textSub,fontSize:"13px",lineHeight:"1.7"}}>{String(r.issue_summary)}</p></Section>}
+
         {Array.isArray(r.observations) && r.observations.length>0 && (
           <Section title="観測事実" color="#0891b2">
             {(r.observations as string[]).map((o,i)=>(
@@ -485,6 +641,33 @@ function DiagnosisPageInner() {
             ))}
           </Section>
         )}
+
+        {r.structure_map && typeof r.structure_map==="object" && (
+          <Section title="🧠 STRUCTURE MAP" color="#7c3aed"><div style={{breakInside:"avoid",pageBreakInside:"avoid"}}>
+            {r.structure_map.core_system && (
+              <div style={{marginBottom:"10px"}}>
+                <p style={{color:"#a78bfa",fontSize:"11px",fontWeight:700,marginBottom:"4px"}}>CORE SYSTEM</p>
+                <p style={{color:C.textSub,fontSize:"12px",lineHeight:"1.6"}}>{String(r.structure_map.core_system)}</p>
+              </div>
+            )}
+            {(["actors","resources","constraints","feedback_loops","failure_points"] as const).map((key)=>{
+              const labels: Record<string,string> = {actors:"ACTORS",resources:"RESOURCES",constraints:"CONSTRAINTS",feedback_loops:"FEEDBACK LOOPS",failure_points:"FAILURE POINTS"};
+              const arr = r.structure_map[key];
+              if (!Array.isArray(arr) || arr.length===0) return null;
+              return (
+                <div key={key} style={{marginBottom:"8px"}}>
+                  <p style={{color:"#a78bfa",fontSize:"11px",fontWeight:700,marginBottom:"4px"}}>{labels[key]}</p>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:"4px"}}>
+                    {(arr as string[]).map((v,i)=>(
+                      <span key={i} style={{background:"rgba(124,58,237,0.12)",border:"1px solid rgba(124,58,237,0.3)",color:"#c4b5fd",borderRadius:"8px",padding:"2px 9px",fontSize:"11px"}}>{v}</span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div></Section>
+        )}
+
         {Array.isArray(r.surface_causes) && r.surface_causes.length>0 && (
           <Section title="🔎 表層原因" color="#d97706">
             {(r.surface_causes as string[]).map((c,i)=>(
@@ -495,6 +678,7 @@ function DiagnosisPageInner() {
             ))}
           </Section>
         )}
+
         {Array.isArray(r.root_causes) && r.root_causes.length>0 && (
           <Section title="🔍 根因" color="#dc2626">
             {(r.root_causes as string[]).map((c,i)=>(
@@ -505,6 +689,68 @@ function DiagnosisPageInner() {
             ))}
           </Section>
         )}
+
+        {Array.isArray(r.causal_chains) && r.causal_chains.length>0 && (
+          <Section title="🔗 CAUSAL CHAINS" color="#0891b2">
+            <div style={{display:"flex",flexDirection:"column",gap:"10px",breakInside:"avoid",pageBreakInside:"avoid"}}>
+              {(r.causal_chains as any[]).map((chain,i)=>{
+                const conf = String(chain.confidence||"");
+                const confColor = conf==="高"?"#ef4444":conf==="中"?"#f59e0b":"#6b7280";
+                return (
+                  <div key={i} className="avoid-break" style={{background:"rgba(8,145,178,0.07)",border:"1px solid rgba(8,145,178,0.2)",borderRadius:"12px",padding:"12px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px"}}>
+                      <span style={{color:"#0891b2",fontWeight:700,fontSize:"11px"}}>CHAIN {i+1}</span>
+                      <span style={{background:`${confColor}20`,border:`1px solid ${confColor}50`,color:confColor,borderRadius:"99px",padding:"1px 8px",fontSize:"10px",fontWeight:700}}>confidence: {conf||"−"}</span>
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:"4px"}}>
+                      {([["ROOT",chain.root,"#ef4444"],["MECHANISM",chain.mechanism,"#f59e0b"],["SYMPTOM",chain.symptom,"#0891b2"],["BUSINESS IMPACT",chain.business_impact,"#dc2626"]] as [string,any,string][]).map(([label,val,color])=>(
+                        val ? (
+                          <div key={label} style={{display:"flex",alignItems:"flex-start",gap:"6px"}}>
+                            <span style={{color:color,fontSize:"10px",fontWeight:700,minWidth:"110px",paddingTop:"1px"}}>{label}</span>
+                            <p style={{color:C.textSub,fontSize:"12px",lineHeight:"1.6",flex:1}}>{String(val)}</p>
+                          </div>
+                        ) : null
+                      ))}
+                      {Array.isArray(chain.evidence) && chain.evidence.length>0 && (
+                        <div style={{display:"flex",alignItems:"flex-start",gap:"6px",marginTop:"2px"}}>
+                          <span style={{color:"#6b7280",fontSize:"10px",fontWeight:700,minWidth:"110px",paddingTop:"1px"}}>EVIDENCE</span>
+                          <div style={{flex:1}}>
+                            {(chain.evidence as string[]).map((ev,j)=>(
+                              <p key={j} style={{color:"#9ca3af",fontSize:"11px"}}>・{ev}</p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Section>
+        )}
+
+        {Array.isArray(r.bottlenecks) && r.bottlenecks.length>0 && (
+          <Section title="🚧 BOTTLENECKS" color="#f59e0b">
+            <div style={{display:"flex",flexDirection:"column",gap:"10px",breakInside:"avoid",pageBreakInside:"avoid"}}>
+              {(r.bottlenecks as any[]).map((bn,i)=>{
+                const prio = String(bn.priority||"");
+                const prioColor = prio==="高"?"#ef4444":prio==="中"?"#f59e0b":"#6b7280";
+                return (
+                  <div key={i} className="avoid-break" style={{background:"rgba(245,158,11,0.07)",border:"1px solid rgba(245,158,11,0.2)",borderRadius:"12px",padding:"12px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px"}}>
+                      <p style={{color:"#f59e0b",fontWeight:700,fontSize:"12px"}}>{String(bn.point||"")}</p>
+                      <span style={{background:`${prioColor}20`,border:`1px solid ${prioColor}50`,color:prioColor,borderRadius:"99px",padding:"1px 8px",fontSize:"10px",fontWeight:700}}>priority: {prio||"−"}</span>
+                    </div>
+                    {bn.why_bottleneck && <p style={{color:C.textSub,fontSize:"12px",marginBottom:"4px"}}>⚠ {String(bn.why_bottleneck)}</p>}
+                    {bn.affected_area && <p style={{color:"#9ca3af",fontSize:"11px",marginBottom:"4px"}}>影響範囲: {String(bn.affected_area)}</p>}
+                    {bn.first_fix && <p style={{color:"#34d399",fontSize:"12px",fontWeight:600}}>→ 初手: {String(bn.first_fix)}</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </Section>
+        )}
+
         {Array.isArray(r.priority_points) && r.priority_points.length>0 && (
           <Section title="🎯 優先論点" color="#7c3aed">
             {(r.priority_points as string[]).map((p,i)=>(
@@ -515,16 +761,32 @@ function DiagnosisPageInner() {
             ))}
           </Section>
         )}
-        {Array.isArray(r.constraints) && r.constraints.length>0 && (
-          <Section title="⚠️ 制約条件" color="#d97706">
-            {(r.constraints as string[]).map((c,i)=>(
-              <div key={i} className="flex items-start gap-2 mb-1">
-                <span style={{color:"#d97706",fontSize:"12px"}}>■</span>
-                <p style={{color:C.textSub,fontSize:"12px"}}>{c}</p>
+
+        {(r.current_structure||r.ideal_structure) && (
+          <Section title="🌉 CURRENT → IDEAL STRUCTURE" color="#059669">
+            {r.current_structure && (
+              <div style={{background:"rgba(5,150,105,0.08)",border:"1px solid rgba(5,150,105,0.2)",borderRadius:"10px",padding:"10px 12px",marginBottom:"8px"}}>
+                <p style={{color:"#6ee7b7",fontSize:"10px",fontWeight:700,marginBottom:"4px"}}>CURRENT</p>
+                <p style={{color:C.textSub,fontSize:"12px",lineHeight:"1.6"}}>{String(r.current_structure)}</p>
               </div>
-            ))}
+            )}
+            {Array.isArray(r.transition_barriers) && r.transition_barriers.length>0 && (
+              <div style={{padding:"6px 0 6px 12px",borderLeft:"2px solid rgba(5,150,105,0.3)",marginBottom:"8px"}}>
+                <p style={{color:"#6b7280",fontSize:"10px",fontWeight:700,marginBottom:"4px"}}>TRANSITION BARRIERS</p>
+                {(r.transition_barriers as string[]).map((b,i)=>(
+                  <p key={i} style={{color:"#9ca3af",fontSize:"11px"}}>⛔ {b}</p>
+                ))}
+              </div>
+            )}
+            {r.ideal_structure && (
+              <div style={{background:"rgba(5,150,105,0.12)",border:"1px solid rgba(5,150,105,0.3)",borderRadius:"10px",padding:"10px 12px"}}>
+                <p style={{color:"#6ee7b7",fontSize:"10px",fontWeight:700,marginBottom:"4px"}}>IDEAL</p>
+                <p style={{color:C.textSub,fontSize:"12px",lineHeight:"1.6"}}>{String(r.ideal_structure)}</p>
+              </div>
+            )}
           </Section>
         )}
+
         {Array.isArray(r.recommended_actions) && r.recommended_actions.length>0 && (
           <Section title="⚡ 推奨アクション（優先度順）" color="#059669">
             {(r.recommended_actions as string[]).map((a,i)=>(
@@ -535,6 +797,7 @@ function DiagnosisPageInner() {
             ))}
           </Section>
         )}
+
         {Array.isArray(r.risks) && r.risks.length>0 && (
           <Section title="🚨 リスク" color="#dc2626">
             {(r.risks as string[]).map((rk,i)=>(
@@ -545,6 +808,18 @@ function DiagnosisPageInner() {
             ))}
           </Section>
         )}
+
+        {Array.isArray(r.verification_plan) && r.verification_plan.length>0 && (
+          <Section title="🧪 VERIFICATION PLAN" color="#6366f1"><div style={{breakInside:"avoid",pageBreakInside:"avoid"}}>
+            {(r.verification_plan as string[]).map((v,i)=>(
+              <div key={i} className="avoid-break" style={{display:"flex",alignItems:"flex-start",gap:"8px",marginBottom:"6px"}}>
+                <span style={{background:"rgba(99,102,241,0.2)",border:"1px solid rgba(99,102,241,0.4)",color:"#a5b4fc",borderRadius:"50%",width:"20px",height:"20px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"10px",fontWeight:700,flexShrink:0,marginTop:"1px"}}>{i+1}</span>
+                <p style={{color:C.textSub,fontSize:"12px",lineHeight:"1.6"}}>{v}</p>
+              </div>
+            ))}
+          </div></Section>
+        )}
+
         {Array.isArray(r.missing_information) && r.missing_information.length>0 && (
           <Section title="❓ 不足情報" color="#6b7280">
             {(r.missing_information as string[]).map((m,i)=>(
@@ -557,37 +832,225 @@ function DiagnosisPageInner() {
         )}
       </div>
     );
-
     // issue
     if (activeAnalysisType==="issue") return (
       <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",boxShadow:C.shadowMd}} className="p-5 mt-4">
-        <p style={{color:C.primary,fontWeight:900,fontSize:"15px",marginBottom:"16px"}}>🎯 課題仮説レポート</p>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px"}}>
+          <p style={{color:C.primary,fontWeight:900,fontSize:"17px"}}>
+            🎯 課題仮説レポート
+          </p>
+          <button
+            onClick={handleIssuePrint}
+            style={{
+              padding:"10px 18px",
+              borderRadius:"12px",
+              background:"#4f46e5",
+              color:"white",
+              fontWeight:800,
+              fontSize:"12px",
+              border:"none",
+              cursor:"pointer"
+            }}
+          >
+            🖨️ 印刷・保存
+          </button>
+        </div>
         {Array.isArray(r.main_issues) && r.main_issues.length>0 && (
           <Section title="主要論点" color={C.primary}>
             {(r.main_issues as string[]).map((issue,i)=>(
               <div key={i} className="flex items-start gap-2 mb-1">
-                <span style={{color:C.primary,fontWeight:700,fontSize:"12px"}}>{i+1}.</span>
-                <p style={{color:C.textSub,fontSize:"12px"}}>{issue}</p>
+                <span style={{color:C.primary,fontWeight:700,fontSize:"13px"}}>{i+1}.</span>
+                <p style={{color:C.textSub,fontSize:"13px"}}>{issue}</p>
               </div>
             ))}
           </Section>
         )}
         {Array.isArray(r.hypotheses) && r.hypotheses.length>0 && (
           <Section title="課題仮説" color="#7c3aed">
-            {(r.hypotheses as string[]).map((h,i)=>(
-              <div key={i} className="flex items-start gap-2 mb-2">
-                <span style={{color:"#7c3aed",fontWeight:700,fontSize:"12px",minWidth:"20px"}}>{i+1}.</span>
-                <p style={{color:C.textSub,fontSize:"12px"}}>{h}</p>
+            {(r.hypotheses as any[]).map((h,i)=>{
+              const isObj = h && typeof h === "object";
+              return (
+                <div key={i} style={{border:`1px solid ${C.border}`,borderRadius:"12px",padding:"10px 12px",marginBottom:"10px",background:"rgba(124,58,237,0.04)"}}>
+                  <div className="flex items-start gap-2 mb-2">
+                    <span style={{color:"#7c3aed",fontWeight:900,fontSize:"13px",minWidth:"20px"}}>{i+1}.</span>
+                    <div style={{flex:1}}>
+                      <p style={{color:C.textMain,fontSize:"11px",fontWeight:800,marginBottom:"4px"}}>
+                        {isObj ? (h.title || "仮説") : String(h)}
+                      </p>
+                      {isObj && h.description && (
+                        <p style={{color:C.textSub,fontSize:"13px",lineHeight:"1.7",marginBottom:"8px"}}>{String(h.description)}</p>
+                      )}
+                      {isObj && (
+                        <div style={{display:"flex",gap:"6px",flexWrap:"wrap",marginBottom:"8px"}}>
+                          {h.priority && <span style={{border:"1px solid rgba(217,119,6,0.35)",borderRadius:"999px",padding:"2px 8px",fontSize:"12px",color:"#d97706"}}>優先度: {String(h.priority)}</span>}
+                          {h.confidence && <span style={{border:"1px solid rgba(5,150,105,0.35)",borderRadius:"999px",padding:"2px 8px",fontSize:"12px",color:"#059669"}}>確度: {String(h.confidence)}</span>}
+                        </div>
+                      )}
+                      {isObj && Array.isArray(h.evidence) && h.evidence.length>0 && (
+                        <div style={{marginBottom:"6px"}}>
+                          <p style={{color:C.textMain,fontSize:"12px",fontWeight:800,marginBottom:"2px"}}>根拠</p>
+                          {h.evidence.map((e:any,j:number)=><p key={j} style={{color:C.textSub,fontSize:"12px",lineHeight:"1.6"}}>・{String(e)}</p>)}
+                        </div>
+                      )}
+                      {isObj && h.expected_impact && (
+                        <p style={{color:C.textSub,fontSize:"12px",lineHeight:"1.6"}}><b>影響:</b> {String(h.expected_impact)}</p>
+                      )}
+                      {isObj && h.verification_method && (
+                        <p style={{color:C.textSub,fontSize:"12px",lineHeight:"1.6"}}><b>検証:</b> {String(h.verification_method)}</p>
+                      )}
+                      {isObj && Array.isArray(h.required_data) && h.required_data.length>0 && (
+                        <p style={{color:C.textSub,fontSize:"12px",lineHeight:"1.6"}}><b>必要データ:</b> {h.required_data.map((x:any)=>String(x)).join(" / ")}</p>
+                      )}
+                      {isObj && h.falsification_condition && (
+                        <p style={{color:C.textSub,fontSize:"12px",lineHeight:"1.6"}}><b>反証条件:</b> {String(h.falsification_condition)}</p>
+                      )}
+                      {isObj && h.first_action && (
+                        <p style={{color:"#7c3aed",fontSize:"12px",lineHeight:"1.6",fontWeight:800,marginTop:"4px"}}>初手: {String(h.first_action)}</p>
+                      )}
+                      {isObj && h.priority_reason && (
+                        <p style={{color:"#d97706",fontSize:"12px",lineHeight:"1.6",marginTop:"4px"}}>
+                          <b>優先理由:</b> {String(h.priority_reason)}
+                        </p>
+                      )}
+
+                      {isObj && typeof h.verification_score === "number" && (
+                        <div style={{marginTop:"6px"}}>
+                          <div style={{display:"flex",justifyContent:"space-between",marginBottom:"2px"}}>
+                            <span style={{color:C.textSub,fontSize:"11px"}}>検証可能性</span>
+                            <span style={{color:"#059669",fontSize:"11px",fontWeight:800}}>
+                              {Math.round(Number(h.verification_score || 0)*100)}%
+                            </span>
+                          </div>
+                          <div style={{background:"rgba(0,0,0,0.08)",borderRadius:"999px",height:"5px"}}>
+                            <div
+                              style={{
+                                width:`${Math.round(Number(h.verification_score || 0)*100)}%`,
+                                background:"linear-gradient(90deg,#059669,#10b981)",
+                                borderRadius:"999px",
+                                height:"5px"
+                              }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </Section>
+        )}
+        {Array.isArray(r.root_issues) && r.root_issues.length>0 && (
+          <Section title="🔴 根本課題" color="#dc2626">
+            {(r.root_issues as string[]).map((x,i)=>(
+              <div key={i} className="flex items-start gap-2 mb-1">
+                <span style={{color:"#dc2626",fontWeight:900,fontSize:"13px"}}>●</span>
+                <p style={{color:C.textSub,fontSize:"13px",lineHeight:"1.7"}}>{x}</p>
               </div>
             ))}
           </Section>
         )}
+
+        {Array.isArray(r.surface_issues) && r.surface_issues.length>0 && (
+          <Section title="🟡 表面的課題" color="#d97706">
+            {(r.surface_issues as string[]).map((x,i)=>(
+              <div key={i} className="flex items-start gap-2 mb-1">
+                <span style={{color:"#d97706",fontWeight:900,fontSize:"13px"}}>●</span>
+                <p style={{color:C.textSub,fontSize:"13px",lineHeight:"1.7"}}>{x}</p>
+              </div>
+            ))}
+          </Section>
+        )}
+        {Array.isArray(r.causal_chains) && r.causal_chains.length>0 && (
+          <Section title="🔗 因果連鎖" color="#2563eb">
+            {(r.causal_chains as any[]).map((c,i)=>(
+              <div
+                key={i}
+                style={{
+                  border:`1px solid ${C.border}`,
+                  borderRadius:"12px",
+                  padding:"10px 12px",
+                  marginBottom:"10px",
+                  background:"rgba(37,99,235,0.04)"
+                }}
+              >
+                {c.root && (
+                  <p style={{color:"#dc2626",fontSize:"12px",fontWeight:800,marginBottom:"4px"}}>
+                    ROOT: {String(c.root)}
+                  </p>
+                )}
+                {c.mechanism && (
+                  <p style={{color:"#2563eb",fontSize:"12px",lineHeight:"1.6"}}>
+                    MECHANISM: {String(c.mechanism)}
+                  </p>
+                )}
+                {c.symptom && (
+                  <p style={{color:"#d97706",fontSize:"12px",lineHeight:"1.6"}}>
+                    SYMPTOM: {String(c.symptom)}
+                  </p>
+                )}
+                {c.business_impact && (
+                  <p style={{color:"#059669",fontSize:"12px",lineHeight:"1.6"}}>
+                    IMPACT: {String(c.business_impact)}
+                  </p>
+                )}
+              </div>
+            ))}
+          </Section>
+        )}
+
+        {(r.top_hypothesis || r.priority_reason) && (
+          <Section title="⭐ 最重要仮説" color="#7c3aed">
+            {r.top_hypothesis && (
+              <p style={{color:C.textMain,fontSize:"11px",fontWeight:800,marginBottom:"6px"}}>
+                {String(r.top_hypothesis)}
+              </p>
+            )}
+            {r.priority_reason && (
+              <p style={{color:C.textSub,fontSize:"13px",lineHeight:"1.7"}}>
+                {String(r.priority_reason)}
+              </p>
+            )}
+          </Section>
+        )}
+        {typeof r.verification_score === "number" && (
+          <Section title="🧪 全体検証可能性" color="#059669">
+            <div style={{background:"rgba(0,0,0,0.08)",borderRadius:"999px",height:"8px",marginBottom:"6px"}}>
+              <div
+                style={{
+                  width:`${Math.round(Number(r.verification_score || 0)*100)}%`,
+                  background:"linear-gradient(90deg,#059669,#10b981)",
+                  borderRadius:"999px",
+                  height:"8px"
+                }}
+              />
+            </div>
+            <p style={{color:C.textSub,fontSize:"13px"}}>
+              仮説全体の検証可能性スコア:
+              <span style={{color:"#059669",fontWeight:800}}>
+                {" "}{Math.round(Number(r.verification_score || 0)*100)}%
+              </span>
+            </p>
+          </Section>
+        )}
+
+        {Array.isArray(r.missing_information) && r.missing_information.length>0 && (
+          <Section title="❓ 不足情報" color="#6b7280">
+            {(r.missing_information as string[]).map((m,i)=>(
+              <div key={i} className="flex items-start gap-2 mb-1">
+                <span style={{color:"#6b7280",fontSize:"13px"}}>?</span>
+                <p style={{color:C.textSub,fontSize:"13px",lineHeight:"1.7"}}>{m}</p>
+              </div>
+            ))}
+          </Section>
+        )}
+
         {Array.isArray(r.questions_to_verify) && r.questions_to_verify.length>0 && (
           <Section title="✅ 次に確認すべき質問" color="#059669">
             {(r.questions_to_verify as string[]).map((q,i)=>(
               <div key={i} className="flex items-start gap-2 mb-1">
-                <span style={{color:"#059669",fontSize:"12px"}}>Q{i+1}.</span>
-                <p style={{color:C.textSub,fontSize:"12px"}}>{q}</p>
+                <span style={{color:"#059669",fontSize:"13px"}}>Q{i+1}.</span>
+                <p style={{color:C.textSub,fontSize:"13px"}}>{q}</p>
               </div>
             ))}
           </Section>
@@ -596,8 +1059,8 @@ function DiagnosisPageInner() {
           <Section title="🎯 意思決定ポイント" color="#d97706">
             {(r.decision_points as string[]).map((d,i)=>(
               <div key={i} className="flex items-start gap-2 mb-1">
-                <span style={{color:"#d97706",fontWeight:700,fontSize:"12px"}}>▸</span>
-                <p style={{color:C.textSub,fontSize:"12px"}}>{d}</p>
+                <span style={{color:"#d97706",fontWeight:700,fontSize:"13px"}}>▸</span>
+                <p style={{color:C.textSub,fontSize:"13px"}}>{d}</p>
               </div>
             ))}
           </Section>
@@ -649,19 +1112,68 @@ function DiagnosisPageInner() {
             </div>
           </Section>
         )}
+        {r.overall_assessment && typeof r.overall_assessment === "object" && (r.overall_assessment as {top_contradiction?:string;priority_fix?:string;first_action?:string;summary?:string}).top_contradiction && (
+          <Section title="🚨 最重要矛盾" color="#dc2626">
+            <p style={{color:"#dc2626",fontWeight:700,fontSize:"13px",marginBottom:"6px"}}>{(r.overall_assessment as {top_contradiction:string}).top_contradiction}</p>
+            {(r.overall_assessment as {priority_fix?:string}).priority_fix && <p style={{color:C.textSub,fontSize:"12px",marginBottom:"4px"}}>優先修正箇所: {(r.overall_assessment as {priority_fix:string}).priority_fix}</p>}
+            {(r.overall_assessment as {first_action?:string}).first_action && <p style={{color:"#059669",fontWeight:600,fontSize:"12px"}}>▶ 最初の一手: {(r.overall_assessment as {first_action:string}).first_action}</p>}
+          </Section>
+        )}
         {Array.isArray(r.contradictions) && r.contradictions.length>0 && (
-          <Section title="検出された矛盾" color="#dc2626">
-            {(r.contradictions as {type:string;description:string;why_problematic:string;fix_direction:string}[]).map((c,i)=>(
-              <div key={i} style={{borderBottom:`1px solid rgba(0,0,0,0.06)`,paddingBottom:"10px",marginBottom:"10px"}}>
-                {c.type && <span style={{background:"#dc262615",border:"1px solid #dc262640",color:"#dc2626",borderRadius:"99px",padding:"2px 10px",fontSize:"11px",fontWeight:600,display:"inline-block",marginBottom:"6px"}}>{c.type}</span>}
-                <p style={{color:C.textMain,fontWeight:600,fontSize:"13px",marginBottom:"4px"}}>{c.description}</p>
-                {c.why_problematic && <p style={{color:C.textMuted,fontSize:"11px",marginBottom:"2px"}}>問題点: {c.why_problematic}</p>}
-                {c.fix_direction && <p style={{color:"#059669",fontSize:"11px"}}>修正方向: {c.fix_direction}</p>}
+          <Section title={`真の矛盾 (${r.contradictions.length}件)`} color="#dc2626">
+            {(r.contradictions as {type:string;description:string;strategy_quote?:string;policy_quote?:string;context_quote?:string;why_problematic:string;severity?:string;confidence?:string;fix_direction:string}[]).map((c,i)=>(
+              <div key={i} style={{borderBottom:`1px solid rgba(0,0,0,0.06)`,paddingBottom:"12px",marginBottom:"12px"}}>
+                <div className="flex items-center gap-2 mb-1" style={{flexWrap:"wrap"}}>
+                  {c.type && <span style={{background:"#dc262615",border:"1px solid #dc262640",color:"#dc2626",borderRadius:"99px",padding:"2px 10px",fontSize:"11px",fontWeight:600}}>{c.type}</span>}
+                  {c.severity && <span style={{background:c.severity==="重大"?"#dc262615":c.severity==="中"?"#d9780615":"#05966915",border:`1px solid ${c.severity==="重大"?"#dc262640":c.severity==="中"?"#d9780640":"#05966940"}`,color:c.severity==="重大"?"#dc2626":c.severity==="中"?"#d97706":"#059669",borderRadius:"99px",padding:"2px 8px",fontSize:"11px",fontWeight:600}}>{c.severity}</span>}
+                  {c.confidence && <span style={{background:c.confidence==="高"?"#05966915":c.confidence==="中"?"#d9780615":"#64748b15",border:`1px solid ${c.confidence==="高"?"#05966940":c.confidence==="中"?"#d9780640":"#64748b40"}`,color:c.confidence==="高"?"#059669":c.confidence==="中"?"#d97706":"#64748b",borderRadius:"99px",padding:"2px 8px",fontSize:"11px",fontWeight:600}}>確度: {c.confidence}</span>}
+                </div>
+                <p style={{color:C.textMain,fontWeight:600,fontSize:"13px",marginBottom:"6px"}}>{c.description}</p>
+                {(c.strategy_quote||c.policy_quote||c.context_quote) && (
+                  <div style={{background:"rgba(0,0,0,0.03)",borderRadius:"8px",padding:"6px 10px",marginBottom:"6px",fontSize:"11px",color:C.textMuted}}>
+                    {c.strategy_quote && <p style={{marginBottom:"2px"}}>📌 戦略: 「{c.strategy_quote}」</p>}
+                    {c.policy_quote && <p style={{marginBottom:"2px"}}>📌 方針: 「{c.policy_quote}」</p>}
+                    {c.context_quote && c.context_quote.trim() && <p>📌 背景: 「{c.context_quote}」</p>}
+                  </div>
+                )}
+                {c.why_problematic && <p style={{color:C.textMuted,fontSize:"11px",marginBottom:"4px"}}>⚠ 問題点: {c.why_problematic}</p>}
+                {c.fix_direction && <p style={{color:"#059669",fontSize:"12px",fontWeight:600}}>▶ 修正アクション: {c.fix_direction}</p>}
               </div>
             ))}
           </Section>
         )}
-        {r.overall_assessment && <Section title="総合評価" color={C.primary}><p style={{color:C.textSub,fontSize:"13px",lineHeight:"1.7"}}>{String(r.overall_assessment)}</p></Section>}
+        {Array.isArray(r.tradeoffs) && r.tradeoffs.length>0 && (
+          <Section title={`トレードオフ (${r.tradeoffs.length}件)`} color="#d97706">
+            {(r.tradeoffs as {description:string;tension:string;recommended_priority:string}[]).map((t,i)=>(
+              <div key={i} style={{borderBottom:`1px solid rgba(0,0,0,0.06)`,paddingBottom:"10px",marginBottom:"10px"}}>
+                <p style={{color:C.textMain,fontWeight:600,fontSize:"13px",marginBottom:"4px"}}>{t.description}</p>
+                {t.tension && <p style={{color:C.textMuted,fontSize:"11px",marginBottom:"2px"}}>⚖ 緊張関係: {t.tension}</p>}
+                {t.recommended_priority && <p style={{color:"#d97706",fontSize:"11px",fontWeight:600}}>▶ 推奨優先: {t.recommended_priority}</p>}
+              </div>
+            ))}
+          </Section>
+        )}
+        {Array.isArray(r.contradictions) && r.contradictions.length===0 && (
+          <Section title="矛盾なし" color="#059669"><p style={{color:"#059669",fontSize:"13px"}}>✅ 入力内容に重大な矛盾は検出されませんでした。</p></Section>
+        )}
+        {r.overall_assessment && typeof r.overall_assessment === "object" && (r.overall_assessment as {summary?:string}).summary && (
+          <Section title="総合評価" color={C.primary}><p style={{color:C.textSub,fontSize:"13px",lineHeight:"1.7"}}>{(r.overall_assessment as {summary:string}).summary}</p></Section>
+        )}
+        {r.overall_assessment && typeof r.overall_assessment === "string" && (
+          <Section title="総合評価" color={C.primary}><p style={{color:C.textSub,fontSize:"13px",lineHeight:"1.7"}}>{String(r.overall_assessment)}</p></Section>
+        )}
+        {r.score_basis && (
+          <Section title="スコア根拠" color="#7c3aed"><p style={{color:C.textSub,fontSize:"12px",lineHeight:"1.7"}}>{String(r.score_basis)}</p></Section>
+        )}
+        {Array.isArray(r.missing_information) && r.missing_information.length>0 && (
+          <Section title="不足情報" color="#d97706">
+            <ul style={{margin:0,paddingLeft:"18px"}}>
+              {(r.missing_information as string[]).map((mi,i)=>(
+                <li key={i} style={{color:C.textSub,fontSize:"12px",marginBottom:"4px"}}>{mi}</li>
+              ))}
+            </ul>
+          </Section>
+        )}
       </div>
     );
 
@@ -688,6 +1200,117 @@ function DiagnosisPageInner() {
             ))}
           </div>
         )}
+
+        {/* phases */}
+        {Array.isArray(r.phases) && r.phases.length>0 && (
+          <div style={{marginBottom:"16px"}}>
+            <p style={{color:C.textMain,fontWeight:800,fontSize:"13px",marginBottom:"8px"}}>📅 フェーズ</p>
+            <div style={{border:`1px solid ${C.border}`,borderRadius:"12px",padding:"12px 14px"}}>
+              <ul style={{margin:0,paddingLeft:"16px"}}>
+                {(r.phases as string[]).map((ph,i)=>(
+                  <li key={i} style={{color:C.textSub,fontSize:"12px",marginBottom:"4px"}}>{ph}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {/* critical_path */}
+        {Array.isArray(r.critical_path) && r.critical_path.length>0 && (
+          <div style={{marginBottom:"16px"}}>
+            <p style={{color:C.textMain,fontWeight:800,fontSize:"13px",marginBottom:"8px"}}>🔗 クリティカルパス</p>
+            <div style={{border:`1px solid ${C.border}`,borderRadius:"12px",padding:"12px 14px"}}>
+              <div className="flex flex-wrap gap-2">
+                {(r.critical_path as string[]).map((step,i)=>{
+                  const _nodes = (r.graph && Array.isArray(r.graph.nodes)) ? r.graph.nodes as {task_id?:string;objective?:string}[] : [];
+                  const _node = _nodes.find(n=>n.task_id===step);
+                  const _label = _node ? (_node.objective||step).slice(0,20)+"…" : step;
+                  return (
+                    <span key={i} style={{display:"inline-flex",alignItems:"center",gap:"4px"}}>
+                      <span style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,color:"white",borderRadius:"8px",padding:"3px 10px",fontSize:"12px",fontWeight:600}}>{_label}</span>
+                      {i<r.critical_path.length-1 && <span style={{color:C.textMuted,fontSize:"12px"}}>→</span>}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* graph */}
+        {r.graph && (Array.isArray(r.graph.nodes) || Array.isArray(r.graph.edges)) && (
+          <div style={{marginBottom:"16px"}}>
+            <p style={{color:C.textMain,fontWeight:800,fontSize:"13px",marginBottom:"8px"}}>🕸 依存グラフ</p>
+            <div style={{border:`1px solid ${C.border}`,borderRadius:"12px",padding:"12px 14px"}}>
+              {Array.isArray(r.graph.nodes) && r.graph.nodes.length>0 && (
+                <div style={{marginBottom:"8px"}}>
+                  <p style={{color:C.textSub,fontSize:"11px",fontWeight:700,marginBottom:"4px"}}>ノード</p>
+                  <div className="flex flex-wrap gap-2">
+                    {(r.graph.nodes as {task_id?:string;objective?:string;id?:string;label?:string;type?:string}[]).map((n,i)=>(
+                      <span key={i} style={{background:`${C.primary}15`,color:C.primary,borderRadius:"6px",padding:"2px 8px",fontSize:"11px",fontWeight:600}}>
+                        {(n.task_id||n.id||"node")}：{(n.objective||n.label||"").slice(0,20)}…
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {Array.isArray(r.graph.edges) && r.graph.edges.length>0 && (
+                <div>
+                  <p style={{color:C.textSub,fontSize:"11px",fontWeight:700,marginBottom:"4px"}}>エッジ（依存関係）</p>
+                  {(r.graph.edges as {from:string;to:string;label?:string}[]).map((e,i)=>(
+                    <p key={i} style={{color:C.textSub,fontSize:"12px",marginBottom:"2px"}}>
+                      <span style={{color:C.primary,fontWeight:600}}>{e.from}</span>
+                      <span style={{margin:"0 4px"}}>→</span>
+                      <span style={{color:C.primary,fontWeight:600}}>{e.to}</span>
+                      {e.label && <span style={{color:C.textMuted,marginLeft:"6px",fontSize:"11px"}}>({e.label})</span>}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* risks */}
+        {Array.isArray(r.risks) && r.risks.length>0 && (
+          <div style={{marginBottom:"16px"}}>
+            <p style={{color:C.textMain,fontWeight:800,fontSize:"13px",marginBottom:"8px"}}>⚠️ リスク</p>
+            <ul style={{margin:0,paddingLeft:"16px"}}>
+              {(r.risks as string[]).map((rk,i)=>(
+                <li key={i} style={{color:"#dc2626",fontSize:"12px",marginBottom:"4px"}}>{rk}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* blockers */}
+        {Array.isArray(r.blockers) && r.blockers.length>0 && (
+          <div style={{marginBottom:"16px"}}>
+            <p style={{color:C.textMain,fontWeight:800,fontSize:"13px",marginBottom:"8px"}}>🚧 ブロッカー</p>
+            <div style={{border:`1px solid #d9780630`,borderRadius:"12px",padding:"12px 14px",background:"#d9780608"}}>
+              <ul style={{margin:0,paddingLeft:"16px"}}>
+                {(r.blockers as string[]).map((b,i)=>(
+                  <li key={i} style={{color:C.textSub,fontSize:"12px",marginBottom:"4px"}}>{b}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {/* checkpoints */}
+        {Array.isArray(r.checkpoints) && r.checkpoints.length>0 && (
+          <div style={{marginBottom:"8px"}}>
+            <p style={{color:C.textMain,fontWeight:800,fontSize:"13px",marginBottom:"8px"}}>✅ チェックポイント</p>
+            <div style={{border:`1px solid ${C.border}`,borderRadius:"12px",padding:"12px 14px"}}>
+              <ul style={{margin:0,paddingLeft:"16px"}}>
+                {(r.checkpoints as string[]).map((cp,i)=>(
+                  <li key={i} style={{color:C.textSub,fontSize:"12px",marginBottom:"4px"}}>{cp}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+
       </div>
     );
 
@@ -701,28 +1324,36 @@ function DiagnosisPageInner() {
 
   return (
     <div style={{background:C.bg, minHeight:"100vh", fontFamily:"'Inter','Noto Sans JP',sans-serif", color:C.textMain}}>
-      <nav style={{background:"rgba(255,255,255,0.95)",borderBottom:`1px solid ${C.border}`,backdropFilter:"blur(12px)",boxShadow:C.shadow,position:"sticky",top:0,zIndex:50}} className="flex items-center gap-4 px-6 py-3">
-        <button onClick={()=>router.push("/chat")} style={{color:C.textMuted}} className="text-sm hover:text-gray-700 transition-colors">← チャット</button>
-        <span style={{color:C.border}}>|</span>
-        <button onClick={()=>router.push("/mypage")} style={{color:C.textMuted}} className="text-sm hover:text-gray-700 transition-colors">マイページ</button>
-        <span style={{color:C.border}}>|</span>
-        <h1 className="text-base font-bold" style={{color:C.textMain}}>診断・分析</h1>
+      <nav style={{background:"rgba(255,255,255,0.95)",borderBottom:`1px solid ${C.border}`,backdropFilter:"blur(12px)",boxShadow:C.shadow,position:"sticky",top:0,zIndex:50}} className="px-4 py-3">
+        <div className="flex items-center gap-3">
+          <button onClick={()=>router.push("/chat")} style={{color:C.textMuted}} className="text-sm hover:text-gray-700 transition-colors flex-shrink-0">← チャット</button>
+          <span style={{color:C.border}}>|</span>
+          <button onClick={()=>router.push("/mypage")} style={{color:C.textMuted}} className="text-sm hover:text-gray-700 transition-colors flex-shrink-0">マイページ</button>
+          <span style={{color:C.border}}>|</span>
+          <span className="text-sm font-bold flex-1 truncate" style={{color:C.textMain}}>{TABS.find(t=>t.id===tab)?.label ?? "診断・分析"}</span>
+          <div style={{position:"relative",flexShrink:0}}>
+            <button onClick={()=>setTabMenuOpen(o=>!o)}
+              style={{background:C.primary,color:"white",borderRadius:"10px",padding:"5px 12px",fontSize:"16px",border:"none",cursor:"pointer"}}>☰</button>
+            {tabMenuOpen && (
+              <div style={{position:"fixed",top:"56px",right:0,left:0,background:"white",border:`1px solid ${C.border}`,borderBottom:`2px solid ${C.border}`,boxShadow:"0 4px 16px rgba(0,0,0,0.10)",zIndex:49,padding:"8px 16px",display:"flex",flexWrap:"wrap" as const,gap:"4px"}} onClick={()=>setTabMenuOpen(false)}>
+                {TABS.map(t=>(
+                  <button key={t.id} onClick={()=>{setTab(t.id);setConsultResult(null);setActiveAnalysisType("");if(typeof window!=="undefined")localStorage.setItem("diag_tab",t.id);}}
+                    style={tab===t.id
+                      ?{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,color:"white",borderRadius:"10px",width:"100%",textAlign:"left",padding:"8px 12px",border:"none",cursor:"pointer",marginBottom:"2px",display:"block"}
+                      :{background:"transparent",color:C.textSub,borderRadius:"10px",width:"100%",textAlign:"left",padding:"8px 12px",border:"none",cursor:"pointer",marginBottom:"2px",display:"block"}
+                    }
+                    className="text-xs font-medium transition-all hover:bg-indigo-50">
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </nav>
 
       <div className="max-w-4xl mx-auto px-4 py-6">
-        {/* タブ */}
-        <div className="flex gap-1.5 flex-wrap mb-6">
-          {TABS.map(t=>(
-            <button key={t.id} onClick={()=>{setTab(t.id);setConsultResult(null);setActiveAnalysisType("");if(typeof window!=="undefined")localStorage.setItem("diag_tab",t.id);}}
-              style={tab===t.id
-                ?{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,color:"white",boxShadow:C.shadowPrimary,borderRadius:"10px"}
-                :{background:C.card,border:`1px solid ${C.border}`,color:C.textSub,borderRadius:"10px",boxShadow:C.shadow}
-              }
-              className="text-xs px-3 py-1.5 font-medium transition-all hover:text-gray-700">
-              {t.label}
-            </button>
-          ))}
-        </div>
+
 
         {error && <p className="text-red-500 text-xs bg-red-50 border border-red-200 rounded-xl px-4 py-2 mb-4">{error}</p>}
 
@@ -836,6 +1467,27 @@ function DiagnosisPageInner() {
               </button>
             </div>
             {renderConsultResult()}
+            {/* 保存済み構造診断 */}
+            <div style={{marginTop:"24px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"12px"}}>
+                <p style={{fontSize:"16px",fontWeight:800,color:C.textMain}}>🗂 保存済み構造診断</p>
+                <button onClick={loadStructureHistory} style={{background:"none",border:"none",cursor:"pointer",color:C.textSub,fontSize:"14px"}}>更新</button>
+              </div>
+              {structureHistory.length===0?(
+                <div style={{padding:"18px",fontSize:"15px",color:C.textSub}}>保存済みレポートはありません</div>
+              ):(
+                structureHistory.map((h:any,i:number)=>(
+                  <div key={i} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"12px",padding:"14px 16px",marginBottom:"8px"}}>
+                    <p style={{fontSize:"11px",color:C.textSub,marginBottom:"4px"}}>{h.created_at ? new Date(h.created_at).toLocaleString("ja-JP") : ""}</p>
+                    <p style={{fontSize:"13px",color:C.textMain,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginBottom:"8px"}}>{String(h.input_text||"").slice(0,60)}{String(h.input_text||"").length>60?"…":""}</p>
+                    <div style={{display:"flex",gap:"6px"}}>
+                      <button onClick={()=>{setConsultResult(h.result);setActiveAnalysisType("structure");}} style={{fontSize:"11px",color:"#4f46e5",background:"none",border:"1px solid #4f46e5",borderRadius:"6px",padding:"3px 10px",cursor:"pointer"}}>開く</button>
+                      <button onClick={()=>deleteStructureAnalysis(h.doc_id)} style={{fontSize:"11px",color:"#ef4444",background:"none",border:"1px solid #ef4444",borderRadius:"6px",padding:"3px 10px",cursor:"pointer"}}>削除</button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         )}
 
@@ -855,6 +1507,25 @@ function DiagnosisPageInner() {
               </button>
             </div>
             {renderConsultResult()}
+            <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",marginTop:"16px",overflow:"hidden"}}>
+              <div style={{padding:"14px 18px",borderBottom:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <p style={{fontSize:"18px",fontWeight:800,color:C.textMain}}>📚 保存済み課題仮説</p>
+                <button onClick={loadIssueHistory} style={{background:"none",border:"none",cursor:"pointer",color:C.textSub,fontSize:"14px"}}>更新</button>
+              </div>
+              {issueHistory.length===0?(
+                <div style={{padding:"18px",fontSize:"15px",color:C.textSub}}>保存済みレポートはありません</div>
+              ):(
+                issueHistory.map((h:any)=>(
+                  <div key={h.doc_id} style={{padding:"16px 18px",borderBottom:`1px solid ${C.border}`,cursor:"pointer"}} onClick={()=>{setConsultResult(h.result);setActiveAnalysisType("issue");}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:"6px"}}>
+                      <p style={{fontSize:"16px",fontWeight:700,color:C.textMain}}>🎯 課題仮説</p>
+                      <p style={{fontSize:"12px",color:C.textSub}}>{String(h.created_at||"")}</p>
+                    </div>
+                    <p style={{fontSize:"14px",color:C.textSub,lineHeight:"1.7"}}>{String(h.input_text||"")}</p>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         )}
 
@@ -885,14 +1556,17 @@ function DiagnosisPageInner() {
           <div className="space-y-4">
             <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",boxShadow:C.shadow}} className="p-5">
               <p className="text-sm font-bold mb-3" style={{color:C.textMain}}>⚡ 矛盾検知</p>
-              <p className="text-xs mb-4" style={{color:C.textSub}}>戦略と方針の矛盾・整合性を検証します</p>
-              <textarea value={strategy} onChange={e=>setStrategy(e.target.value)} placeholder="戦略・目標を入力&#10;例：2年で売上2倍・新規顧客比率50%以上"
+              <p className="text-xs mb-4" style={{color:C.textSub}}>背景・戦略・方針の3軸から矛盾・整合性を検証します</p>
+              <textarea value={inputText} onChange={e=>setInputText(e.target.value)} placeholder="【背景・課題・状況】を入力&#10;例：既存顧客が離脱気味・新規が取れていない・スタッフ3名体制"
                 style={{background:"rgba(0,0,0,0.02)",border:`1px solid ${C.border}`,borderRadius:"12px",color:C.textMain,width:"100%",resize:"none"}}
                 className="text-sm px-4 py-3 focus:outline-none placeholder-gray-400" rows={3}/>
-              <textarea value={policy} onChange={e=>setPolicy(e.target.value)} placeholder="方針・制約・現在の施策を入力&#10;例：値下げ禁止・紹介のみ集客・月広告費5万上限"
+              <textarea value={strategy} onChange={e=>setStrategy(e.target.value)} placeholder="【目標・戦略】を入力&#10;例：2年で売上2倍・新規顧客比率50%以上"
                 style={{background:"rgba(0,0,0,0.02)",border:`1px solid ${C.border}`,borderRadius:"12px",color:C.textMain,width:"100%",resize:"none",marginTop:"8px"}}
                 className="text-sm px-4 py-3 focus:outline-none placeholder-gray-400" rows={3}/>
-              <button onClick={()=>handleConsult("contradiction")} disabled={loading||!strategy.trim()}
+              <textarea value={policy} onChange={e=>setPolicy(e.target.value)} placeholder="【方針・制約・現在の施策】を入力&#10;例：値下げ禁止・紹介のみ集客・月広告費5万上限"
+                style={{background:"rgba(0,0,0,0.02)",border:`1px solid ${C.border}`,borderRadius:"12px",color:C.textMain,width:"100%",resize:"none",marginTop:"8px"}}
+                className="text-sm px-4 py-3 focus:outline-none placeholder-gray-400" rows={3}/>
+              <button onClick={()=>handleConsult("contradiction")} disabled={loading||(!strategy.trim()&&!inputText.trim()&&!policy.trim())}
                 style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,boxShadow:C.shadowPrimary,borderRadius:"12px",marginTop:"12px"}}
                 className="text-white text-sm font-bold px-6 py-2.5 hover:opacity-90 disabled:opacity-50">
                 {loading?"分析中...":"矛盾検知を実行"}
@@ -1550,25 +2224,99 @@ function DiagnosisPageInner() {
                         {isAvoid && <span style={{position:"absolute",top:"10px",right:"10px",background:"#ef4444",color:"white",fontSize:"9px",fontWeight:700,padding:"2px 8px",borderRadius:"20px"}}>回避</span>}
                         <p style={{fontSize:"10px",fontWeight:700,color:"#6b7280",marginBottom:"4px"}}>ルート {b.id}</p>
                         <p style={{fontSize:"14px",fontWeight:900,color:"#111827",marginBottom:"10px"}}>{b.label}</p>
-                        <div style={{display:"flex",gap:"8px",marginBottom:"10px",flexWrap:"wrap"}}>
+                        {/* state_transition タイムライン */}
+                        {b.state_transition && (
+                          <div style={{marginBottom:"12px",padding:"8px",background:"rgba(0,0,0,0.03)",borderRadius:"8px"}}>
+                            <p style={{fontSize:"9px",fontWeight:700,color:"#9ca3af",marginBottom:"6px",letterSpacing:"0.05em"}}>因果連鎖</p>
+                            {b.state_transition.map((s:string,i:number)=>(
+                              <div key={i} style={{display:"flex",flexDirection:"column",alignItems:"flex-start"}}>
+                                <span style={{fontSize:"11px",color:"#374151",lineHeight:1.5,fontWeight:i===0||i===b.state_transition.length-1?700:400}}>{s}</span>
+                                {i<b.state_transition.length-1 && <span style={{fontSize:"10px",color:"#d1d5db",lineHeight:1}}>↓</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <div style={{display:"flex",gap:"8px",marginBottom:"6px",flexWrap:"wrap"}}>
                           <span style={{background:"rgba(0,0,0,0.04)",borderRadius:"8px",padding:"2px 8px",fontSize:"10px",fontWeight:700,color:"#374151"}}>成功率 {b.success_rate}%</span>
                           <span style={{background:`${riskColor}18`,borderRadius:"8px",padding:"2px 8px",fontSize:"10px",fontWeight:700,color:riskColor}}>リスク {b.risk}</span>
                         </div>
+                        {/* score_basis */}
+                        {b.score_basis && (
+                          <p style={{fontSize:"10px",color:"#9ca3af",lineHeight:1.6,marginBottom:"10px",fontStyle:"italic"}}>{b.score_basis}</p>
+                        )}
                         <ul style={{margin:0,padding:"0 0 0 14px",marginBottom:"10px"}}>
                           {b.points?.map((p:string,i:number)=>(
                             <li key={i} style={{fontSize:"12px",color:"#374151",lineHeight:1.7,marginBottom:"2px"}}>{p}</li>
                           ))}
                         </ul>
+                        {/* 追加バッジ */}
+                        <div style={{display:"flex",flexWrap:"wrap",gap:"6px",marginBottom:"10px"}}>
+                          {b.short_term && <span style={{fontSize:"10px",background:"rgba(99,102,241,0.08)",color:"#4f46e5",borderRadius:"6px",padding:"2px 7px"}}>短期: {b.short_term}</span>}
+                          {b.mid_term && <span style={{fontSize:"10px",background:"rgba(245,158,11,0.08)",color:"#d97706",borderRadius:"6px",padding:"2px 7px"}}>中期: {b.mid_term}</span>}
+                          {b.long_term && <span style={{fontSize:"10px",background:"rgba(16,185,129,0.08)",color:"#059669",borderRadius:"6px",padding:"2px 7px"}}>長期: {b.long_term}</span>}
+                          {b.execution_difficulty && <span style={{fontSize:"10px",background:"rgba(0,0,0,0.05)",color:"#374151",borderRadius:"6px",padding:"2px 7px"}}>実行難易度: {b.execution_difficulty}</span>}
+                          {b.continuity_load && <span style={{fontSize:"10px",background:"rgba(0,0,0,0.05)",color:"#374151",borderRadius:"6px",padding:"2px 7px"}}>継続負荷: {b.continuity_load}</span>}
+                          {b.market_fit && <span style={{fontSize:"10px",background:"rgba(0,0,0,0.05)",color:"#374151",borderRadius:"6px",padding:"2px 7px"}}>市場適合: {b.market_fit}</span>}
+                          {b.current_fit && <span style={{fontSize:"10px",background:"rgba(0,0,0,0.05)",color:"#374151",borderRadius:"6px",padding:"2px 7px"}}>現状整合: {b.current_fit}</span>}
+                        </div>
+                        {b.required_resources && b.required_resources.length>0 && (
+                          <div style={{marginBottom:"10px"}}>
+                            <p style={{fontSize:"10px",color:"#6b7280",marginBottom:"3px"}}>必要資源</p>
+                            <div style={{display:"flex",flexWrap:"wrap",gap:"4px"}}>
+                              {b.required_resources.map((r:string,i:number)=>(
+                                <span key={i} style={{fontSize:"10px",background:"rgba(0,0,0,0.04)",color:"#374151",borderRadius:"6px",padding:"2px 7px"}}>{r}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {b.collapse_risk && (
+                          <div style={{marginBottom:"10px",padding:"6px 8px",background:"rgba(239,68,68,0.05)",borderRadius:"6px",borderLeft:"3px solid #ef4444"}}>
+                            <p style={{fontSize:"9px",fontWeight:700,color:"#ef4444",marginBottom:"2px"}}>崩壊リスク</p>
+                            <p style={{fontSize:"11px",color:"#7f1d1d",lineHeight:1.5}}>{b.collapse_risk}</p>
+                          </div>
+                        )}
+                        {b.expected_return && (
+                          <div style={{marginBottom:"10px"}}>
+                            <p style={{fontSize:"10px",color:"#6b7280",marginBottom:"2px"}}>期待リターン</p>
+                            <p style={{fontSize:"11px",color:"#111827",lineHeight:1.5}}>{b.expected_return}</p>
+                          </div>
+                        )}
                         <div style={{borderTop:"1px solid rgba(0,0,0,0.06)",paddingTop:"8px",marginTop:"4px"}}>
                           <p style={{fontSize:"10px",color:"#6b7280",marginBottom:"2px"}}>必要行動</p>
                           <p style={{fontSize:"12px",fontWeight:700,color:"#111827"}}>{b.required_action}</p>
                           <p style={{fontSize:"10px",color:"#6b7280",marginTop:"4px",marginBottom:"2px"}}>到達する未来</p>
                           <p style={{fontSize:"12px",fontWeight:700,color:"#111827"}}>{b.future}</p>
+                          {b.time_horizon && <p style={{fontSize:"10px",color:"#9ca3af",marginTop:"4px"}}>意思決定期限: {b.time_horizon}</p>}
                         </div>
                       </div>
                     );
                   })}
                 </div>
+                {/* simulation_basis */}
+                {futureResult.simulation_basis && (
+                  <div style={{background:"rgba(99,102,241,0.04)",border:"1px solid rgba(99,102,241,0.15)",borderRadius:"12px",padding:"14px"}}>
+                    <p style={{fontSize:"11px",fontWeight:700,color:"#4f46e5",marginBottom:"10px",letterSpacing:"0.05em"}}>🧮 ASCEND 前提条件・信頼度</p>
+                    {futureResult.simulation_basis.confidence && (
+                      <p style={{fontSize:"12px",color:"#374151",marginBottom:"8px"}}>分析信頼度: <strong>{futureResult.simulation_basis.confidence}</strong></p>
+                    )}
+                    {futureResult.simulation_basis.assumptions?.length>0 && (
+                      <div style={{marginBottom:"8px"}}>
+                        <p style={{fontSize:"10px",fontWeight:700,color:"#6b7280",marginBottom:"4px"}}>前提仮定</p>
+                        {futureResult.simulation_basis.assumptions.map((a:string,i:number)=>(
+                          <p key={i} style={{fontSize:"11px",color:"#374151",lineHeight:1.6,marginBottom:"2px"}}>• {a}</p>
+                        ))}
+                      </div>
+                    )}
+                    {futureResult.simulation_basis.missing_information?.length>0 && (
+                      <div>
+                        <p style={{fontSize:"10px",fontWeight:700,color:"#dc2626",marginBottom:"4px"}}>⚠️ 判断に必要だが不明な情報</p>
+                        {futureResult.simulation_basis.missing_information.map((m:string,i:number)=>(
+                          <p key={i} style={{fontSize:"11px",color:"#7f1d1d",lineHeight:1.6,marginBottom:"2px",background:"rgba(239,68,68,0.06)",borderRadius:"4px",padding:"2px 6px"}}>• {m}</p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {/* 未来マップ */}
                 <div style={{background:"#0f172a",borderRadius:"16px",padding:"16px"}}>
                   <p style={{fontSize:"11px",fontWeight:700,color:"rgba(255,255,255,0.5)",marginBottom:"10px"}}>🗺️ 未来マップ</p>
@@ -1587,7 +2335,34 @@ function DiagnosisPageInner() {
                   <p style={{fontSize:"11px",fontWeight:700,color:"rgba(255,255,255,0.4)",marginBottom:"12px",letterSpacing:"0.1em"}}>ASCEND FINAL OUTPUT</p>
                   <p style={{color:"rgba(255,255,255,0.5)",fontSize:"11px",marginBottom:"4px"}}>最も合理的な未来</p>
                   <p style={{color:"#a5b4fc",fontWeight:900,fontSize:"18px",marginBottom:"6px"}}>ルート {futureResult.recommended}</p>
-                  <p style={{color:"rgba(255,255,255,0.75)",fontSize:"12px",lineHeight:1.7,marginBottom:"16px"}}>{futureResult.recommended_reason}</p>
+                  {/* recommended_reason 強化表示 */}
+                  {typeof futureResult.recommended_reason === "object" && futureResult.recommended_reason !== null ? (
+                    <div style={{marginBottom:"16px"}}>
+                      {futureResult.recommended_reason.current_alignment && (
+                        <div style={{marginBottom:"6px"}}>
+                          <p style={{fontSize:"9px",fontWeight:700,color:"rgba(255,255,255,0.4)",marginBottom:"2px"}}>現状整合性</p>
+                          <p style={{color:"rgba(255,255,255,0.75)",fontSize:"12px",lineHeight:1.6}}>{futureResult.recommended_reason.current_alignment}</p>
+                        </div>
+                      )}
+                      {futureResult.recommended_reason.sustainability && (
+                        <div style={{marginBottom:"6px"}}>
+                          <p style={{fontSize:"9px",fontWeight:700,color:"rgba(255,255,255,0.4)",marginBottom:"2px"}}>継続可能性</p>
+                          <p style={{color:"rgba(255,255,255,0.75)",fontSize:"12px",lineHeight:1.6}}>{futureResult.recommended_reason.sustainability}</p>
+                        </div>
+                      )}
+                      {futureResult.recommended_reason.low_collapse_reason && (
+                        <div style={{marginBottom:"6px"}}>
+                          <p style={{fontSize:"9px",fontWeight:700,color:"rgba(255,255,255,0.4)",marginBottom:"2px"}}>崩壊回避性</p>
+                          <p style={{color:"rgba(255,255,255,0.75)",fontSize:"12px",lineHeight:1.6}}>{futureResult.recommended_reason.low_collapse_reason}</p>
+                        </div>
+                      )}
+                      {futureResult.recommended_reason.summary && (
+                        <p style={{color:"rgba(255,255,255,0.5)",fontSize:"11px",marginTop:"6px",fontStyle:"italic"}}>{futureResult.recommended_reason.summary}</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p style={{color:"rgba(255,255,255,0.75)",fontSize:"12px",lineHeight:1.7,marginBottom:"16px"}}>{futureResult.recommended_reason}</p>
+                  )}
                   <p style={{color:"rgba(255,255,255,0.5)",fontSize:"11px",marginBottom:"8px"}}>今すぐやるべきこと</p>
                   {futureResult.immediate_actions?.map((a:string,i:number)=>(
                     <div key={i} style={{display:"flex",gap:"10px",alignItems:"flex-start",marginBottom:"6px"}}>
@@ -1598,7 +2373,34 @@ function DiagnosisPageInner() {
                   <div style={{marginTop:"16px",borderTop:"1px solid rgba(255,255,255,0.1)",paddingTop:"12px"}}>
                     <p style={{color:"rgba(255,255,255,0.5)",fontSize:"11px",marginBottom:"4px"}}>避けるべき未来</p>
                     <p style={{color:"#f87171",fontWeight:700,fontSize:"13px",marginBottom:"4px"}}>ルート {futureResult.avoid_branch}</p>
-                    <p style={{color:"rgba(255,255,255,0.6)",fontSize:"12px",lineHeight:1.7}}>{futureResult.avoid_reason}</p>
+                    {/* avoid_reason 強化表示 */}
+                    {typeof futureResult.avoid_reason === "object" && futureResult.avoid_reason !== null ? (
+                      <div>
+                        {futureResult.avoid_reason.collapse_trigger && (
+                          <div style={{marginBottom:"6px"}}>
+                            <p style={{fontSize:"9px",fontWeight:700,color:"rgba(255,255,255,0.4)",marginBottom:"2px"}}>崩壊トリガー</p>
+                            <p style={{color:"rgba(255,255,255,0.6)",fontSize:"12px",lineHeight:1.6}}>{futureResult.avoid_reason.collapse_trigger}</p>
+                          </div>
+                        )}
+                        {futureResult.avoid_reason.early_warning && (
+                          <div style={{marginBottom:"6px"}}>
+                            <p style={{fontSize:"9px",fontWeight:700,color:"rgba(255,255,255,0.4)",marginBottom:"2px"}}>初期警戒兆候</p>
+                            <p style={{color:"rgba(255,255,255,0.6)",fontSize:"12px",lineHeight:1.6}}>{futureResult.avoid_reason.early_warning}</p>
+                          </div>
+                        )}
+                        {futureResult.avoid_reason.point_of_no_return && (
+                          <div style={{marginBottom:"6px"}}>
+                            <p style={{fontSize:"9px",fontWeight:700,color:"rgba(255,255,255,0.4)",marginBottom:"2px"}}>回復困難地点</p>
+                            <p style={{color:"rgba(255,255,255,0.6)",fontSize:"12px",lineHeight:1.6}}>{futureResult.avoid_reason.point_of_no_return}</p>
+                          </div>
+                        )}
+                        {futureResult.avoid_reason.summary && (
+                          <p style={{color:"rgba(255,255,255,0.4)",fontSize:"11px",marginTop:"4px",fontStyle:"italic"}}>{futureResult.avoid_reason.summary}</p>
+                        )}
+                      </div>
+                    ) : (
+                      <p style={{color:"rgba(255,255,255,0.6)",fontSize:"12px",lineHeight:1.7}}>{futureResult.avoid_reason}</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1623,13 +2425,77 @@ function DiagnosisPageInner() {
                 <div style={{display:"flex",gap:"4px",flexShrink:0}}>
                   <button onClick={()=>{if(h.result){setFutureResult(h.result);window.scrollTo({top:0,behavior:"smooth"});}}} style={{fontSize:"10px",color:"#4f46e5",background:"none",border:"1px solid #4f46e5",borderRadius:"6px",padding:"2px 7px",cursor:"pointer"}}>開く</button>
                   <button onClick={()=>deleteFutureSimulation(h.doc_id)} style={{fontSize:"10px",color:"#ef4444",background:"none",border:"1px solid #ef4444",borderRadius:"6px",padding:"2px 7px",cursor:"pointer"}}>削除</button>
+                  {h.prediction_tracking?.status==="pending" ? (
+                    <button onClick={()=>{setReviewTarget(h);setReviewResult(null);setReviewInput({actual_outcome:"",actual_success_level:50,actual_risk:"中",actual_state:""});}} style={{fontSize:"10px",color:"#f59e0b",background:"none",border:"1px solid #f59e0b",borderRadius:"6px",padding:"2px 7px",cursor:"pointer"}}>検証入力</button>
+                  ) : h.prediction_tracking?.status==="validated" ? (
+                    <span style={{fontSize:"10px",color:"#10b981",fontWeight:700}}>✓ 検証済 {h.prediction_tracking.accuracy_score}pt</span>
+                  ) : null}
                 </div>
               </div>
               {h.result?.recommended && (
-                <p style={{fontSize:"11px",color:"#6b7280"}}>推奨: ルート {h.result.recommended}　{(h.result?.recommended_reason||"").slice(0,40)}{(h.result?.recommended_reason||"").length>40?"…":""}</p>
+                <p style={{fontSize:"11px",color:"#6b7280"}}>推奨: ルート {h.result.recommended}　{(()=>{const r=h.result?.recommended_reason;const s=typeof r==="object"&&r!==null?r.summary||"":String(r||"");return s.slice(0,40)+(s.length>40?"…":"");})()}</p>
               )}
             </div>
           ))}
+        {/* 検証入力モーダル */}
+        {reviewTarget && (
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:"16px"}}>
+            <div style={{background:"white",borderRadius:"16px",padding:"20px",width:"100%",maxWidth:"480px",maxHeight:"80vh",overflowY:"auto"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px"}}>
+                <p style={{fontWeight:700,fontSize:"14px",color:"#111827"}}>🔍 予測検証 — 実際の結果を入力</p>
+                <button onClick={()=>{setReviewTarget(null);setReviewResult(null);}} style={{background:"none",border:"none",fontSize:"18px",cursor:"pointer",color:"#6b7280"}}>✕</button>
+              </div>
+              <p style={{fontSize:"11px",color:"#6b7280",marginBottom:"12px"}}>推奨ルート: <strong>{reviewTarget.result?.recommended}</strong> / シミュレーション日: {(reviewTarget.created_at||"").slice(0,10)}</p>
+              <div style={{marginBottom:"12px"}}>
+                <p style={{fontSize:"11px",fontWeight:700,color:"#374151",marginBottom:"4px"}}>実際の結果（どうなったか）</p>
+                <textarea value={reviewInput.actual_outcome} onChange={e=>setReviewInput((p:any)=>({...p,actual_outcome:e.target.value}))} rows={3} placeholder="例：売上が少し改善した、施策を実行したが効果なし、別の問題が発生した..." style={{width:"100%",border:"1px solid #e5e7eb",borderRadius:"8px",padding:"8px",fontSize:"12px",resize:"vertical",boxSizing:"border-box" as const}}/>
+              </div>
+              <div style={{marginBottom:"12px"}}>
+                <p style={{fontSize:"11px",fontWeight:700,color:"#374151",marginBottom:"4px"}}>実際の成功度 (0〜100)</p>
+                <input type="range" min={0} max={100} value={reviewInput.actual_success_level} onChange={e=>setReviewInput((p:any)=>({...p,actual_success_level:Number(e.target.value)}))} style={{width:"100%"}}/>
+                <p style={{fontSize:"11px",color:"#6b7280",textAlign:"center" as const}}>{reviewInput.actual_success_level}点</p>
+              </div>
+              <div style={{marginBottom:"12px"}}>
+                <p style={{fontSize:"11px",fontWeight:700,color:"#374151",marginBottom:"4px"}}>実際のリスク</p>
+                <div style={{display:"flex",gap:"8px"}}>
+                  {["低","中","高"].map(r=>(
+                    <button key={r} onClick={()=>setReviewInput((p:any)=>({...p,actual_risk:r}))} style={{flex:1,padding:"6px",borderRadius:"8px",border:`2px solid ${reviewInput.actual_risk===r?"#4f46e5":"#e5e7eb"}`,background:reviewInput.actual_risk===r?"rgba(79,70,229,0.08)":"white",fontWeight:700,fontSize:"12px",cursor:"pointer",color:reviewInput.actual_risk===r?"#4f46e5":"#374151"}}>{r}</button>
+                  ))}
+                </div>
+              </div>
+              <div style={{marginBottom:"16px"}}>
+                <p style={{fontSize:"11px",fontWeight:700,color:"#374151",marginBottom:"4px"}}>現在の状態</p>
+                <textarea value={reviewInput.actual_state} onChange={e=>setReviewInput((p:any)=>({...p,actual_state:e.target.value}))} rows={2} placeholder="例：事業継続中、部分的に改善、撤退検討中..." style={{width:"100%",border:"1px solid #e5e7eb",borderRadius:"8px",padding:"8px",fontSize:"12px",resize:"vertical",boxSizing:"border-box" as const}}/>
+              </div>
+              {reviewResult && (
+                <div style={{background:"rgba(79,70,229,0.06)",border:"1px solid rgba(79,70,229,0.2)",borderRadius:"10px",padding:"12px",marginBottom:"16px"}}>
+                  <p style={{fontSize:"11px",fontWeight:700,color:"#4f46e5",marginBottom:"6px"}}>📊 予測精度スコア</p>
+                  <p style={{fontSize:"24px",fontWeight:900,color:"#111827",marginBottom:"4px"}}>{reviewResult.accuracy_score}点</p>
+                  {reviewResult.prediction_gap && (
+                    <div style={{fontSize:"11px",color:"#6b7280",lineHeight:1.7}}>
+                      <p>予測成功率: {reviewResult.prediction_gap.predicted_success_rate}% → 実際: {reviewResult.prediction_gap.actual_success_level}点（差: {reviewResult.prediction_gap.rate_gap}）</p>
+                      <p>リスク予測: {reviewResult.prediction_gap.predicted_risk} → 実際: {reviewResult.prediction_gap.actual_risk} {reviewResult.prediction_gap.risk_matched?"✓ 一致":"✗ 不一致"}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+              <button onClick={async()=>{
+                if(!reviewInput.actual_outcome.trim()){return;}
+                setReviewLoading(true);
+                try{
+                  const token=localStorage.getItem("ascend_token")||"";
+                  const API_BASE=process.env.NEXT_PUBLIC_API_URL||"";
+                  const r=await fetch(`${API_BASE}/api/diagnosis/future_simulation_review/${reviewTarget.doc_id}`,{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`},body:JSON.stringify(reviewInput)});
+                  const d=await r.json();
+                  if(r.ok){setReviewResult(d);loadFutureHistory();}
+                }catch(e){}
+                finally{setReviewLoading(false);}
+              }} disabled={reviewLoading||!reviewInput.actual_outcome.trim()} style={{width:"100%",background:"linear-gradient(135deg,#4f46e5,#7c3aed)",border:"none",borderRadius:"10px",color:"white",fontWeight:700,fontSize:"13px",padding:"10px",cursor:"pointer",opacity:reviewLoading||!reviewInput.actual_outcome.trim()?0.5:1}}>
+                {reviewLoading?"送信中...":"検証を送信する"}
+              </button>
+            </div>
+          </div>
+        )}
         </div>
       )}
       {tab==="file" && (
@@ -1642,7 +2508,7 @@ function DiagnosisPageInner() {
             </div>
           </div>
         )}
-        {tab==="profile" && mounted && (
+        {tab==="profile" && mounted && features?.diag_profile===true && (
           <div className="space-y-4">
             <div style={{background:"linear-gradient(135deg,#0f172a,#1e1b4b)",borderRadius:"20px",padding:"20px 24px",boxShadow:"0 8px 32px rgba(99,102,241,0.25)"}}>
               <p style={{color:"rgba(255,255,255,0.35)",fontSize:"9px",letterSpacing:"0.2em",fontWeight:700,marginBottom:"6px"}}>PROFILE ANALYSIS</p>
@@ -1898,13 +2764,94 @@ function DiagnosisPageInner() {
                 </div>
               ))}
             </div>
+
+            {/* プロファイル生成ガイド */}
+                <div style={{background:"white",border:"1px solid rgba(0,0,0,0.08)",borderRadius:"16px",boxShadow:"0 1px 3px rgba(0,0,0,0.08)"}}>
+                  <button onClick={()=>setProfileGuideOpen(p=>!p)} style={{width:"100%",padding:"14px 20px",background:"none",border:"none",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
+                      <span style={{background:"rgba(99,102,241,0.1)",borderRadius:"50%",width:"22px",height:"22px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"12px",fontWeight:700,color:"#6366f1"}}>?</span>
+                      <span style={{fontWeight:700,fontSize:"13px",color:"#111827"}}>使い方ガイド</span>
+                    </div>
+                    <span style={{color:"#9ca3af",fontSize:"12px"}}>{profileGuideOpen?"▲ 閉じる":"▼ 開く"}</span>
+                  </button>
+                  {profileGuideOpen && (
+                    <div style={{padding:"0 20px 20px",borderTop:"1px solid rgba(0,0,0,0.06)"}}>
+                      {/* 価値訴求 */}
+                      <div style={{background:"linear-gradient(135deg,#4f46e5,#7c3aed)",borderRadius:"12px",padding:"16px 18px",marginTop:"16px",marginBottom:"12px"}}>
+                        <p style={{color:"rgba(255,255,255,0.5)",fontSize:"9px",fontWeight:700,letterSpacing:"0.2em",marginBottom:"8px"}}>ASCEND プロファイル生成</p>
+                        <p style={{color:"white",fontWeight:900,fontSize:"14px",marginBottom:"4px"}}>人の行動原理・思考構造を解剖し、最適な関わり方を導出する</p>
+                        <p style={{color:"rgba(255,255,255,0.55)",fontSize:"11px",marginBottom:"12px",lineHeight:1.6}}>観察情報を入力するだけで、AIが対象者の思考・行動・対人構造を多角的に分析。接し方・地雷・信頼構築の最短経路を特定します。</p>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px"}}>
+                          {([
+                            ["🧠 思考構造の解明","判断基準・価値観・信念から行動原理を特定し、次の行動を予測"],
+                            ["⚡ 地雷・崩れる条件","ストレス反応・怒りポイント・崩壊条件を把握して衝突を回避"],
+                            ["👥 対人構造の把握","信頼条件・苦手タイプから関わり方と信頼構築の最短経路を導出"],
+                            ["🔗 固有因果連鎖","繰り返すパターンの根本原因を特定し本質的な問題を把握"],
+                            ["🔍 深掘り質問（生成後）","危険系・活用系・関係系・深層系の質問をAIが自動生成"],
+                            ["💬 自由質問（生成後）","結果に対して任意で追加質問し、さらに深い分析が可能"],
+                          ] as [string,string][]).map(([title,desc])=>(
+                            <div key={title} style={{background:"rgba(255,255,255,0.08)",borderRadius:"8px",padding:"8px 10px"}}>
+                              <p style={{color:"white",fontWeight:700,fontSize:"11px",marginBottom:"2px"}}>{title}</p>
+                              <p style={{color:"rgba(255,255,255,0.55)",fontSize:"9px",lineHeight:1.5}}>{desc}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      {/* 使い方の流れ */}
+                      <div style={{background:"linear-gradient(135deg,#0f172a,#1e1b4b)",borderRadius:"12px",padding:"14px 16px",marginBottom:"14px"}}>
+                        <p style={{color:"rgba(255,255,255,0.4)",fontSize:"9px",fontWeight:700,letterSpacing:"0.15em",marginBottom:"10px"}}>📋 使い方の流れ</p>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"}}>
+                          {([
+                            {step:"① 情報入力",color:"#6366f1",items:["対象者名・関係性を入力","会話傾向・行動構造・対人構造など観察した情報を入力","項目が多いほど分析精度が上がります（全項目入力不要）"]},
+                            {step:"② プロファイル生成",color:"#059669",items:["「プロファイルを生成する」を押す","固有因果連鎖・存在構造・接客スタイル・地雷・信頼条件を生成","印刷・保存で手元に残せます"]},
+                            {step:"③ 深掘り質問（任意）",color:"#d97706",items:["生成後に「AI質問を生成」を押す","危険系・活用系・関係系・深層系の質問が自動生成される","質問をタップするだけでAIが即回答","自由入力でオリジナル質問も可能"]},
+                            {step:"④ 履歴管理",color:"#0891b2",items:["過去のプロファイルは画面下の履歴から再表示","「開く」で結果と深掘り質問を再利用","不要なものは削除可能"]},
+                          ] as {step:string;color:string;items:string[]}[]).map(({step,color,items})=>(
+                            <div key={step} style={{background:`${color}10`,borderRadius:"10px",padding:"10px 12px",border:`1px solid ${color}25`}}>
+                              <p style={{color,fontWeight:700,fontSize:"11px",marginBottom:"6px"}}>{step}</p>
+                              {items.map((item,i)=>(
+                                <p key={i} style={{color:"rgba(255,255,255,0.7)",fontSize:"10px",lineHeight:1.6,marginBottom:"2px"}}>• {item}</p>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      {/* 項目ガイド */}
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px"}}>
+                        {([
+                          {icon:"💬",title:"会話傾向",items:["よく使う言葉・話題：口癖・頻出テーマから価値観・優先事項を推定","会話時の特徴：話し方のクセ・パターンから思考構造を読む"]},
+                          {icon:"⚙️",title:"行動構造",items:["判断基準：何を優先して動くかを把握することで行動予測が可能","ストレス反応：崩れるときのパターンを知ることで対処できる","繰り返す行動パターン：無意識の習慣から内面の課題を推論"]},
+                          {icon:"👥",title:"対人構造",items:["人間関係で求めるもの：対人ニーズから最適な関わり方を設計","苦手な相手：地雷タイプを把握して不要な衝突を回避","信頼する条件：信頼構築の最短経路を特定して関係を加速"]},
+                          {icon:"💼",title:"仕事・行動特性",items:["仕事への姿勢：得意な動き方と弱点を把握して活かし方を設計","崩れる条件：パフォーマンスが落ちる環境・状況を事前に把握"]},
+                          {icon:"🔍",title:"構造的シグナル",items:["繰り返す矛盾：表面的な言動と内面のズレを検出","執着・怒りポイント：感情が動く無意識の優先事項を特定","正義化パターン：自己保護・責任回避の構造を解析"]},
+                          {icon:"🕵️",title:"行動痕跡（重要）",items:["観察した行動をそのまま入力するだけでOK（解釈・分析不要）","無意識に環境へ残した行動サインから内面状態をAIが推論","「会議で結論直前に別議題を出す」など具体的な行動を記入"]},
+                          {icon:"🔍",title:"深掘り質問（生成後）",items:["⚡ 危険系：地雷・崩壊条件・リスク行動を深掘り","✨ 活用系：強み・得意パターン・活かし方を深掘り","👥 関係系：対人ニーズ・信頼条件・相性を深掘り","🧬 深層系：無意識の動機・根本原因を深掘り","自由入力で任意の質問も可能"]},
+                          {icon:"⚠️",title:"注意事項",items:["分析結果は傾向・確率の提示です。断定ではありません","最終判断は必ず人間が行ってください","個人情報は適切に管理してください"]},
+                        ] as {icon:string;title:string;items:string[]}[]).map(({icon,title,items})=>(
+                          <div key={title} style={{background:"#f8f9fc",borderRadius:"12px",padding:"12px 14px"}}>
+                            <p style={{fontWeight:700,fontSize:"12px",color:"#111827",marginBottom:"8px"}}>{icon} {title}</p>
+                            <ul style={{margin:0,padding:"0 0 0 14px"}}>
+                              {items.map((item,i)=>(
+                                <li key={i} style={{fontSize:"11px",color:"#6b7280",lineHeight:1.7,marginBottom:"2px"}}>{item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+          </div>
+        )}
+        {tab==="crm" && mounted && features?.diag_crm===true && (
+          <div className="space-y-4">
+            <CustomerManagement />
           </div>
         )}
       </div>
     </div>
   );
 }
-
 import { Suspense } from "react";
 export default function DiagnosisPageWrapper() {
   return (

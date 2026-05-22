@@ -65,6 +65,7 @@ export default function AscendAboutPage() {
         { name: "固定概念レポート", desc: "思考の固定概念を分析", url: "/mypage?tab=fc", flag: "fixed_concept_report" },
         { name: "プレゼン資料生成", desc: "スライドを自動生成", url: "/diagnosis?tab=presentation", flag: "diag_presentation" },
         { name: "🕵️ プロファイル生成", desc: "特徴入力→人柄・行動パターン・強み・接し方を推定（APEX/ULTRA）", url: "/diagnosis?tab=profile", flag: "diag_profile" },
+        { name: "👥 顧客AIマネジメント", desc: "顧客心理状態を時系列推論し、接客最適化・離脱防止・キャスト相性・店舗全体知能を統合した店舗知能OS（APEX/ULTRA）", url: "/diagnosis?tab=crm", flag: "diag_crm" },
       ] },
     { icon: "🎨", title: "生成系", items: [
         { name: "画像生成", desc: "AIで画像を生成", url: "/chat", flag: "image_generation" },
@@ -174,7 +175,8 @@ export default function AscendAboutPage() {
                     <button key={it.name} onClick={()=>handleNavigate(it.url, it.flag)} style={{textAlign:"left",background:"#fff",border:`1px solid ${enabled?"rgba(99,102,241,0.2)":"rgba(0,0,0,0.08)"}`,borderRadius:"14px",padding:"14px 16px",boxShadow:"0 1px 4px rgba(0,0,0,0.04)",borderTop:`3px solid ${enabled?PRIMARY:"#cbd5e1"}`,opacity: enabled?1:0.62,cursor:"pointer",transition:"all 0.18s"}}>
                       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"6px"}}>
                         <p style={{fontSize:"13px",fontWeight:800,color:"#111827"}}>{it.name}</p>
-                        {!enabled && <span style={{fontSize:"9px",fontWeight:700,color:"#94a3b8",background:"#f1f5f9",borderRadius:"99px",padding:"2px 8px"}}>未開放</span>}
+                        {enabled && it.flag && <span style={{fontSize:"9px",fontWeight:700,color:"#059669",background:"rgba(5,150,105,0.1)",borderRadius:"99px",padding:"2px 8px"}}>✓ 解放済み</span>}
+                        {!enabled && it.flag && <span style={{fontSize:"9px",fontWeight:700,color:"#94a3b8",background:"#f1f5f9",borderRadius:"99px",padding:"2px 8px"}}>🔒 未開放</span>}
                       </div>
                       <p style={{fontSize:"11px",color:"#6b7280",lineHeight:1.6}}>{it.desc}</p>
                     </button>

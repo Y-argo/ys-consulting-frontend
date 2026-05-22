@@ -25,3 +25,34 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@media (max-width: 600px) {
+  .mat-grid-2col {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media print {
+  body * { visibility: hidden !important; }
+  #structure-report-print,
+  #structure-report-print * { visibility: visible !important; }
+  #structure-report-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    background: white !important;
+    color: #111 !important;
+  }
+  #structure-report-print * {
+    color: #111 !important;
+    background: #f9fafb !important;
+    border-color: #e5e7eb !important;
+    box-shadow: none !important;
+  }
+  #structure-report-print .avoid-break {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  nav, button { display: none !important; }
+}

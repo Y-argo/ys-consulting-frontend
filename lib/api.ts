@@ -1,5 +1,5 @@
 // lib/api.ts
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL || "";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL || "https://ys-consulting-api-665881683479.asia-northeast1.run.app";
 
 function getToken(): string {
   if (typeof window === "undefined") return "";
@@ -233,6 +233,7 @@ export interface UserStats {
   expires_at?: string;
   level_last_delta?: number;
   tenant_id?: string;
+  notification_settings?: Record<string, boolean | string>;
 }
 
 export async function getUserStats(): Promise<UserStats | null> {
@@ -241,7 +242,7 @@ export async function getUserStats(): Promise<UserStats | null> {
   return res.json();
 }
 
-export async function getUsageLogs(): Promise<{prompt: string; timestamp: string}[]> {
+export async function getUsageLogs(): Promise<{prompt: string; timestamp: string; purpose_mode?: string; diagnosis_type?: string}[]> {
   const res = await fetch(`${API_BASE}/api/user/usage_logs`, { headers: authHeaders() });
   if (!res.ok) return [];
   const data = await res.json();
@@ -497,8 +498,15 @@ export async function sendImageMessage(
       body: JSON.stringify({ message, chat_id, ai_tier, image_b64, image_mime }),
       signal: controller.signal,
     });
-    if (!res.ok) { const err = await res.json().catch(()=>({})); throw new Error(err.detail||"画像送信失敗"); }
-    return res.json();
+    const text = await res.text();
+    let data: any = {};
+    try { data = text ? JSON.parse(text) : {}; } catch {
+      throw new Error("画像送信失敗: JSON解析失敗 url=" + `${API_BASE}/api/chat/send_image` + " status=" + res.status + " body=" + text.slice(0,300));
+    }
+    if (!res.ok) {
+      throw new Error(data.detail || ("画像送信失敗: status=" + res.status + " body=" + text.slice(0,300)));
+    }
+    return data;
   } catch(e: unknown) {
     if (e instanceof Error && e.name==="AbortError") throw new Error("応答に時間がかかっています。");
     throw e;
@@ -631,10 +639,12 @@ async function _ssePost(url: string, body: object, onStep: SSECallback): Promise
   let dataBuf = "";
   let result: SSEResult | null = null;
   let _sseErr: string | null = null;
+  let _rawSseText = "";
   while (true) {
     const { done, value } = await reader.read();
     // done=trueでもvalueにデータが含まれる場合があるため必ずデコード
     const chunk = value ? decoder.decode(value, { stream: !done }) : "";
+    _rawSseText += chunk;
     lineBuf += chunk;
     // 行単位に分割して処理
     const rawLines = lineBuf.split("\n");
@@ -653,17 +663,45 @@ async function _ssePost(url: string, body: object, onStep: SSECallback): Promise
           } catch {}
           dataBuf = "";
         }
-      } else if (line.startsWith("data: ")) {
-        // data行: 既存dataBufに追記（複数data行対応）
-        const payload = line.slice(6);
+      } else if (line.startsWith("data:")) {
+        // data行: "data: xxx" / "data:xxx" の両方に対応
+        const payload = line.slice(5).trimStart();
         dataBuf = dataBuf ? dataBuf + payload : payload;
       }
       // コメント行（:）やその他フィールドは無視
     }
     if (done) break;
   }
+
+  if (dataBuf) {
+    try {
+      const evt = JSON.parse(dataBuf);
+      if (evt.type === "step") onStep(evt.label);
+      else if (evt.type === "done") result = evt as SSEResult;
+      else if (evt.type === "error") _sseErr = evt.message || "エラー";
+    } catch {}
+    dataBuf = "";
+  }
+
+  if (!result && !_sseErr && _rawSseText) {
+    try {
+      const dataLines = _rawSseText
+        .split(/\r?\n/)
+        .map(l => l.trimEnd())
+        .filter(l => l.startsWith("data:"))
+        .map(l => l.slice(5).trimStart());
+
+      for (const payload of dataLines) {
+        if (!payload) continue;
+        const evt = JSON.parse(payload);
+        if (evt.type === "done") result = evt as SSEResult;
+        else if (evt.type === "error") _sseErr = evt.message || "エラー";
+      }
+    } catch {}
+  }
+
   if (_sseErr) throw new Error("⚠️ " + _sseErr);
-  if (!result) throw new Error("SSE応答なし");
+  if (!result) throw new Error("SSE応答なし raw=" + _rawSseText.slice(-300));
   return result;
 }
 
@@ -719,4 +757,41 @@ export async function generateEventPlan(fields: Record<string,string>): Promise<
     if (!res.ok) return { ok: false, data: null };
     return res.json();
   } catch { return { ok: false, data: null }; }
+}
+
+export async function getNotifications(): Promise<Array<{notif_id:string;type:string;title:string;body:string;link_tab:string;read:boolean;created_at:string}>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/user/notifications`, { headers: authHeaders() });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.notifications || [];
+  } catch { return []; }
+}
+
+export async function markNotificationRead(notif_id: string): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/api/user/notifications/${notif_id}/read`, {
+      method: "PATCH", headers: authHeaders() as Record<string, string>,
+    });
+  } catch {}
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/api/user/notifications/read_all`, {
+      method: "PATCH", headers: authHeaders() as Record<string, string>,
+    });
+  } catch {}
+}
+
+export async function saveNotificationSettings(settings: Record<string,boolean|string>): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/user/notification_settings_save`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+    body: JSON.stringify(settings),
+  });
+  const data = await res.json().catch(()=>({}));
+  if (!res.ok || data.ok === false) {
+    throw new Error(data.error || data.detail || "通知設定の保存に失敗しました");
+  }
 }
