@@ -484,27 +484,18 @@ export default function ChatPage() {
           <div className="flex-1 text-center">
             {headerCfg.subtitle && <span style={{color:C.primary,fontSize:"11px",fontWeight:600}}>{headerCfg.subtitle}</span>}
           </div>
-          <button onClick={()=>setLeftOpen(!leftOpen)}
-            style={{background:C.primary,color:"white",borderRadius:"10px",padding:"5px 12px",fontSize:"16px",border:"none",cursor:"pointer",flexShrink:0}}>☰</button>
-        </div>
-        {/* 2行目: テナント名（左）AIエンジン + ユーザー 右寄せ */}
-        <div className="flex items-center gap-2 px-4 pb-2">
-          <span style={{color:C.primary,fontSize:"10px",fontWeight:700,letterSpacing:"0.01em",flex:1}}>Ys Consulting Office</span>
-          <div style={{background:"rgba(79,70,229,0.08)",border:`1px solid ${C.borderPrimary}`,borderRadius:"10px"}} className="px-2 py-1 flex items-center gap-1">
-            <span className="text-xs" style={{color:C.primary}}>⚡</span>
-            <select value={aiTier} onChange={e=>setAiTier(e.target.value)} style={{background:"transparent",color:C.primary}} className="text-xs focus:outline-none cursor-pointer">
-              <option value="core" style={{background:"#fff",color:"#111"}}>SWIFT（迅速）</option>
-              {ultraEnabled && <option value="ultra" style={{background:"#fff",color:"#111"}}>ADVANCE（高度）</option>}
-              {apexEnabled  && <option value="apex"  style={{background:"#fff",color:"#111"}}>SUPREME（至高）</option>}
-            </select>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {uid && <button onClick={()=>router.push("/mypage")} style={{background:`linear-gradient(135deg,rgba(79,70,229,0.1),rgba(124,58,237,0.1))`,border:`1px solid rgba(79,70,229,0.2)`,borderRadius:"8px",color:C.primary,display:"flex",alignItems:"center",gap:"3px",padding:"2px 6px 2px 2px",cursor:"pointer",maxWidth:"140px",overflow:"hidden"}} className="transition-all hover:opacity-80">
+              <div style={{width:"16px",height:"16px",borderRadius:"50%",background:`linear-gradient(135deg,${C.primary},${C.primary2})`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                <span className="text-white font-black" style={{fontSize:"9px"}}>{uid.charAt(0).toUpperCase()}</span>
+              </div>
+              <span className="font-bold" style={{fontSize:"10px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{uid}</span>
+            </button>}
+            <button onClick={()=>setLeftOpen(!leftOpen)}
+              style={{background:C.primary,color:"white",borderRadius:"10px",padding:"5px 12px",fontSize:"16px",border:"none",cursor:"pointer",flexShrink:0}}>☰</button>
           </div>
-          <button onClick={()=>router.push("/mypage")} style={{background:`linear-gradient(135deg,rgba(79,70,229,0.1),rgba(124,58,237,0.1))`,border:`1px solid ${C.borderPrimary}`,borderRadius:"10px",color:C.primary,display:"flex",alignItems:"center",gap:"4px",padding:"4px 8px 4px 4px"}} className="transition-all hover:opacity-80">
-            <div style={{width:"20px",height:"20px",borderRadius:"50%",background:`linear-gradient(135deg,${C.primary},${C.primary2})`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-              <span className="text-white font-black text-xs">{uid.charAt(0).toUpperCase()}</span>
-            </div>
-            <span className="font-bold text-xs">{uid}</span>
-          </button>
         </div>
+  
       </nav>
 
       {/* 通知バナー */}
@@ -535,6 +526,10 @@ export default function ChatPage() {
         {leftOpen && (
           <aside style={{background:C.sidebar, borderRight:`1px solid ${C.border}`, width:"220px", display:"flex", flexDirection:"column", overflowY:"auto", scrollbarWidth:"none", msOverflowStyle:"none"}} className="flex-shrink-0 [&::-webkit-scrollbar]:hidden">
             <div className="p-3 space-y-2">
+              {/* テナント名 */}
+              <div style={{padding:"4px 4px 2px"}}>
+                <span style={{color:C.primary,fontSize:"10px",fontWeight:700,letterSpacing:"0.01em"}}>Ys Consulting Office</span>
+              </div>
 
               {/* ASCENDとは ボタン（最上部） */}
               <button onClick={()=>router.push("/ascend-about")} style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,boxShadow:C.shadowPrimary,borderRadius:"14px",padding:"10px 12px",width:"100%",textAlign:"left",color:"white",fontSize:"12px",fontWeight:800,display:"flex",alignItems:"center",gap:"8px",border:"none",cursor:"pointer"}} className="hover:opacity-90 transition-all">
@@ -961,7 +956,18 @@ export default function ChatPage() {
                                     {([["🏗️","構造診断","structure","事業・組織の構造を解剖しボトルネックを特定"],["🎯","課題仮説","issue","状況から課題仮説を優先度付きで生成"],["⚖️","比較分析","comparison","複数案を多軸で客観比較し推奨案を提示"],["⚡","矛盾検知","contradiction","戦略・方針間の矛盾と整合性を検証"],["📋","実行計画","execution","フェーズ別・期限付きアクションプランを生成"]] as [string,string,string,string][]).map(([icon,label,tab,desc])=>(
                                       <button key={tab} onClick={()=>{
                                         const _inputText = Array.isArray(_s.cards)?[_s.summary,..._s.cards.map((c:{title:string;items:string[]})=>`\n\n【${c.title}】\n`+(c.items||[]).join("\n"))].join(""):[_s.summary,"\n\n【現状】\n"+(Array.isArray(_s.cards?.current)?_s.cards.current:[]).join("\n"),"\n\n【問題・リスク】\n"+(Array.isArray(_s.cards?.risk)?_s.cards.risk:[]).join("\n"),"\n\n【推奨方針】\n"+(Array.isArray(_s.cards?.plan)?_s.cards.plan:[]).join("\n")].join("");
-                                        try{sessionStorage.setItem("diag_input_"+tab, _inputText);}catch(_e){}
+                                        const _cur = (Array.isArray(_s.cards?.current)?_s.cards.current:[]).join("\n");
+                                        const _risk = (Array.isArray(_s.cards?.risk)?_s.cards.risk:[]).join("\n");
+                                        const _plan = (Array.isArray(_s.cards?.plan)?_s.cards.plan:[]).join("\n");
+                                        const _base = _cur || _plan || _risk || "";
+                                        const _diagInput =
+                                          tab==="structure" ? [_cur,_risk,_plan].filter(Boolean).join("\n\n") :
+                                          tab==="issue" ? [_cur,_risk].filter(Boolean).join("\n\n") :
+                                          tab==="execution" ? [_plan,_risk].filter(Boolean).join("\n\n") :
+                                          tab==="comparison" ? ["A案：" + (_plan || _base),"B案：" + (_risk || "別案・制約を入力")].join("\n\n") :
+                                          tab==="contradiction" ? [_cur || "",_plan || "",_risk || ""].join("\n---ASCEND_CONTRADICTION_SPLIT---\n") :
+                                          _base;
+                                        try{sessionStorage.setItem("diag_input_"+tab, _diagInput);}catch(_e){}
                                         window.location.href="/diagnosis?tab="+tab;
                                       }}
                                         title={desc}
@@ -1143,7 +1149,7 @@ export default function ChatPage() {
                     {m.confirmation_choices.map((q,qi)=>(
                       <button key={qi} onClick={()=>setInputAndSave(q)}
                         style={{background:qi===0?"rgba(79,70,229,0.08)":qi===1?"rgba(16,185,129,0.08)":"rgba(245,158,11,0.08)",border:qi===0?"1.5px solid rgba(79,70,229,0.4)":qi===1?"1.5px solid rgba(16,185,129,0.4)":"1.5px solid rgba(245,158,11,0.4)",borderRadius:"12px",color:qi===0?"#4f46e5":qi===1?"#059669":"#d97706",fontWeight:700}}
-                        className="w-full text-left text-xs px-4 py-2.5 transition-all block hover:opacity-80">
+                        className="w-full text-left text-xs px-4 py-2.5 transition-all block hover:opacity-80 whitespace-normal break-words leading-relaxed">
                         {q}
                       </button>
                     ))}
@@ -1155,7 +1161,7 @@ export default function ChatPage() {
                     {m.suggestions.map((q,qi)=>(
                       <button key={qi} onClick={()=>setInputAndSave(q)}
                         style={{background:C.card,border:`1px solid ${C.borderPrimary}`,borderRadius:"12px",boxShadow:C.shadow,color:C.textSub}}
-                        className="w-full text-left text-xs px-4 py-2.5 transition-all block hover:opacity-80">
+                        className="w-full text-left text-xs px-4 py-2.5 transition-all block hover:opacity-80 whitespace-normal break-words leading-relaxed">
                         {q}
                       </button>
                     ))}
@@ -1344,8 +1350,24 @@ export default function ChatPage() {
             )}
             <form onSubmit={handleSend} className="flex gap-2 items-end">
               <input ref={fileRef} type="file" onChange={handleFileChange} className="hidden" accept=".txt,.md,.csv,.pdf,.xlsx,.xls,.json,.py,.js,.ts,.png,.jpg,.jpeg,.webp"/>
-              <div style={{background:isDragging?"rgba(79,70,229,0.06)":"rgba(0,0,0,0.02)",border:isDragging?`2px dashed ${C.primary}`:`1px solid ${C.border}`,borderRadius:"16px",display:"flex",alignItems:"flex-end",gap:"4px",padding:"6px 8px 6px 8px",transition:"all 0.2s"}} className="flex-1 focus-within:border-indigo-400 transition-all" onDrop={handleDrop} onDragOver={e=>{e.preventDefault();setIsDragging(true);}} onDragLeave={()=>setIsDragging(false)}>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gridTemplateRows:"1fr 1fr",gap:"2px",flexShrink:0,alignSelf:"center",marginRight:"4px"}}>
+              <div style={{background:isDragging?"rgba(79,70,229,0.06)":"rgba(0,0,0,0.02)",border:isDragging?`2px dashed ${C.primary}`:`1px solid ${C.border}`,borderRadius:"16px",display:"flex",flexDirection:"column",gap:"4px",padding:"6px 8px 6px 8px",transition:"all 0.2s"}} className="flex-1 focus-within:border-indigo-400 transition-all" onDrop={handleDrop} onDragOver={e=>{e.preventDefault();setIsDragging(true);}} onDragLeave={()=>setIsDragging(false)}>
+                <div style={{display:"flex",alignItems:"flex-start",gap:"4px"}}>
+                  <textarea value={input} onChange={e=>{setInput(e.target.value);if(typeof window!=="undefined")localStorage.setItem("ascend_input_draft",e.target.value);}}
+                    onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();handleSend(e as unknown as React.FormEvent);}}}
+                    disabled={loading} placeholder={chatMode==="talk" ? "💬 会話モードでコンサルタントに相談... (Shift+Enterで改行)" : "🎯 相談モードでコンサルタントに相談... (Shift+Enterで改行)"}
+                    rows={1} style={{background:"transparent",resize:"none",minHeight:"36px",maxHeight:"160px",color:C.textMain,flex:1}}
+                    className="text-sm px-2 py-1.5 focus:outline-none placeholder-gray-400 disabled:opacity-50 leading-relaxed"
+                  />
+                  <button type="submit" disabled={loading||(!input.trim()&&!attachment)}
+                    style={(!loading&&(input.trim()||attachment))
+                      ?{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,boxShadow:C.shadowPrimary,borderRadius:"10px",padding:"6px 10px",border:"none",cursor:"pointer",flexShrink:0}
+                      :{background:"rgba(0,0,0,0.06)",borderRadius:"10px",padding:"6px 10px",border:"none",cursor:"pointer",flexShrink:0}
+                    }
+                    className="text-white font-bold transition-all disabled:text-gray-400 active:scale-95">
+                    ▶
+                  </button>
+                </div>
+                <div style={{display:"flex",flexDirection:"row",gap:"4px",alignItems:"center"}}>
                   <button type="button" onClick={()=>{setChatMode("talk");localStorage.setItem("ascend_chat_mode","talk");}}
                     style={{borderRadius:"6px",fontSize:"13px",padding:"3px 6px",transition:"all 0.2s",border:"none",cursor:"pointer",lineHeight:1,
                       background:chatMode==="talk"?"#6366f1":"rgba(0,0,0,0.04)",
@@ -1364,22 +1386,21 @@ export default function ChatPage() {
                   <button type="button" onClick={()=>setShowInputExample(!showInputExample)}
                     style={{borderRadius:"6px",fontSize:"13px",padding:"3px 6px",border:"none",cursor:"pointer",lineHeight:1,background:"rgba(0,0,0,0.04)",color:C.textMuted}}
                     className="hover:text-yellow-500 transition-all" title="入力例">💡</button>
+                  <button type="button" onClick={()=>router.push("/diagnosis")}
+                    style={{borderRadius:"6px",fontSize:"13px",padding:"3px 6px",border:"none",cursor:"pointer",lineHeight:1,background:"rgba(0,0,0,0.04)",color:C.textMuted}}
+                    className="hover:text-indigo-500 transition-all" title="診断・分析">📊</button>
+                  <div style={{flex:1}}/>
+                  <div style={{background:"rgba(79,70,229,0.08)",border:`1px solid rgba(79,70,229,0.2)`,borderRadius:"6px",display:"flex",alignItems:"center",gap:"2px",padding:"2px 4px",marginLeft:"auto"}}>
+                    <span style={{color:"#4f46e5",fontSize:"10px"}}>⚡</span>
+                    <select value={aiTier} onChange={e=>{setAiTier(e.target.value);localStorage.setItem("ascend_ai_tier_default",e.target.value);}} style={{background:"transparent",color:"#4f46e5",fontSize:"10px",fontWeight:700}} className="focus:outline-none cursor-pointer">
+                      <option value="core" style={{background:"#fff",color:"#111"}}>SWIFT</option>
+                      {ultraEnabled && <option value="ultra" style={{background:"#fff",color:"#111"}}>ADVANCE</option>}
+                      {apexEnabled  && <option value="apex"  style={{background:"#fff",color:"#111"}}>SUPREME</option>}
+                    </select>
+                  </div>
                 </div>
-                <textarea value={input} onChange={e=>{setInput(e.target.value);if(typeof window!=="undefined")localStorage.setItem("ascend_input_draft",e.target.value);}}
-                  onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();handleSend(e as unknown as React.FormEvent);}}}
-                  disabled={loading} placeholder={chatMode==="talk" ? "💬 会話モードでコンサルタントに相談... (Shift+Enterで改行)" : "🎯 相談モードでコンサルタントに相談... (Shift+Enterで改行)"}
-                  rows={1} style={{background:"transparent",resize:"none",minHeight:"36px",maxHeight:"160px",color:C.textMain,flex:1}}
-                  className="text-sm px-2 py-1.5 focus:outline-none placeholder-gray-400 disabled:opacity-50 leading-relaxed"
-                />
               </div>
-              <button type="submit" disabled={loading||(!input.trim()&&!attachment)}
-                style={(!loading&&(input.trim()||attachment))
-                  ?{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,boxShadow:C.shadowPrimary,borderRadius:"12px"}
-                  :{background:"rgba(0,0,0,0.06)",borderRadius:"12px"}
-                }
-                className="text-white font-bold p-3 transition-all disabled:text-gray-400 flex-shrink-0 active:scale-95">
-                ▶
-              </button>
+
             </form>
             <p className="text-center text-xs mt-2" style={{color:C.textMuted}}>本AIの出力は意思決定支援のための提案です。投資・法務・医療等の重要事項は専門家にご確認ください。</p>
           </div>

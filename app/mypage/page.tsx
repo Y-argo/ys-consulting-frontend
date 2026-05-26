@@ -74,6 +74,7 @@ function MyPageInner() {
   const [stats, setStats] = useState<UserStats|null>(null);
   const [fcData, setFcData] = useState<{report:Record<string,unknown>|null;use_count_since_report:number}>({report:null,use_count_since_report:0});
   const [tab, setTab] = useState<Tab>("overview");
+  const [tabMenuOpen, setTabMenuOpen] = useState(false);
   const [content, setContent] = useState("");
   const [logs, setLogs] = useState<{prompt:string;timestamp:string}[]>([]);
   const [usageLogs, setUsageLogs] = useState<{prompt:string;timestamp:string;purpose_mode?:string;diagnosis_type?:string}[]>([]);
@@ -179,7 +180,7 @@ function MyPageInner() {
   const fcCount = fcData.use_count_since_report;
   const fcPct = Math.min((fcCount/fcThreshold)*100, 100);
   const TABS = [
-    {id:"overview",label:"📊 概要"},
+    {id:"overview",label:"💠 マイページ"},
     {id:"metrics",label:"🎯 Decision Metrics"},
     {id:"fc",label:"🧠 固定概念"},
     {id:"dm",label:"📩 個人相談", badge: inquiryUnread},
@@ -217,17 +218,26 @@ function MyPageInner() {
 
       <div className="max-w-2xl mx-auto px-4 py-6">
         {/* タブ */}
-        <div className="flex gap-1.5 flex-wrap mb-6">
-          {TABS.map(t=>(
-            <button key={t.id} onClick={()=>switchTab(t.id)}
-              style={tab===t.id
-                ?{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,color:"white",boxShadow:C.shadowPrimary,borderRadius:"10px"}
-                :{background:C.card,border:`1px solid ${C.border}`,color:C.textSub,borderRadius:"10px",boxShadow:C.shadow}
-              }
-              className="text-xs px-3 py-1.5 font-medium transition-all">
-              {t.label}{(t.badge??0)>0&&<span style={{background:"#ef4444",color:"white",borderRadius:"99px",fontSize:"10px",fontWeight:900,padding:"1px 5px",marginLeft:"4px",display:"inline-block",lineHeight:"14px",minWidth:"14px",textAlign:"center"}}>{t.badge}</span>}
-            </button>
-          ))}
+        <div className="mb-6" style={{position:"relative"}}>
+          <button onClick={()=>setTabMenuOpen(o=>!o)}
+            style={{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,color:"white",borderRadius:"10px",padding:"7px 14px",fontSize:"13px",fontWeight:800,border:"none",cursor:"pointer",boxShadow:C.shadowPrimary}}>
+            💠 マイページ
+          </button>
+
+          {tabMenuOpen && (
+            <div style={{position:"absolute",top:"42px",left:0,right:0,background:C.card,border:`1px solid ${C.border}`,borderRadius:"16px",boxShadow:C.shadowMd,padding:"10px",zIndex:50,display:"flex",flexWrap:"wrap",gap:"6px"}}>
+              {TABS.map(t=>(
+                <button key={t.id} onClick={()=>{switchTab(t.id);setTabMenuOpen(false);}}
+                  style={tab===t.id
+                    ?{background:`linear-gradient(135deg,${C.primary},${C.primary2})`,color:"white",boxShadow:C.shadowPrimary,borderRadius:"10px"}
+                    :{background:C.card,border:`1px solid ${C.border}`,color:C.textSub,borderRadius:"10px",boxShadow:C.shadow}
+                  }
+                  className="text-xs px-3 py-1.5 font-medium transition-all">
+                  {t.label}{(t.badge??0)>0&&<span style={{background:"#ef4444",color:"white",borderRadius:"99px",fontSize:"10px",fontWeight:900,padding:"1px 5px",marginLeft:"4px",display:"inline-block",lineHeight:"14px",minWidth:"14px",textAlign:"center"}}>{t.badge}</span>}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* 概要 */}
@@ -724,21 +734,13 @@ function MyPageInner() {
                           {depthBars.map(b=>(
                             <div key={b.label}>
                               <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
-                                <span style={{color:"rgba(255,255,255,0.35)",fontSize:"10px",fontWeight:600,width:"28px",flexShrink:0,textAlign:"right" as const}}>{b.label}</span>
+                                <span style={{color:"rgba(255,255,255,0.35)",fontSize:"10px",fontWeight:600,width:"42px",flexShrink:0,textAlign:"right" as const,whiteSpace:"nowrap" as const}}>{b.label}</span>
                                 <div style={{flex:1,background:"rgba(255,255,255,0.06)",borderRadius:"99px",height:"4px",overflow:"hidden"}}>
                                   <div style={{width:`${b.val}%`,background:b.color,borderRadius:"99px",height:"4px",boxShadow:`0 0 6px ${b.color}60`,transition:"width 0.8s ease"}}/>
                                 </div>
                                 <span style={{color:"rgba(255,255,255,0.25)",fontSize:"9px",width:"26px",flexShrink:0}}>{Math.round(b.val)}%</span>
                               </div>
-                              {b.label==="未来" && (
-                                <div style={{display:"flex",gap:"6px",marginLeft:"36px",marginTop:"4px",flexWrap:"wrap" as const}}>
-                                  <span style={{fontSize:"8px",fontWeight:700,color:"#f472b6",letterSpacing:"0.08em",opacity:0.7}}>STRUCTURE QUALITY</span>
-                                  <span style={{fontSize:"8px",color:"rgba(255,255,255,0.2)"}}>·</span>
-                                  <span style={{fontSize:"8px",fontWeight:700,color:"#f472b6",letterSpacing:"0.08em",opacity:0.7}}>CAUSAL DEPTH</span>
-                                  <span style={{fontSize:"8px",color:"rgba(255,255,255,0.2)"}}>·</span>
-                                  <span style={{fontSize:"8px",fontWeight:700,color:"#f472b6",letterSpacing:"0.08em",opacity:0.7}}>SIMULATION REALISM</span>
-                                </div>
-                              )}
+
                             </div>
                           ))}
                         </div>

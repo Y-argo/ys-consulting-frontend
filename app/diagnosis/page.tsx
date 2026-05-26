@@ -10,6 +10,13 @@ import { getStoredUser, getUserStats, UserStats, getMyFeatures } from "@/lib/api
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL || "https://ys-consulting-api-665881683479.asia-northeast1.run.app";
 
+async function deleteIssueHistory(doc_id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/diagnosis/issue_delete/${doc_id}`, {
+    method: "DELETE",
+    headers: authHeaders() as Record<string, string>,
+  });
+  if (!res.ok) throw new Error("削除に失敗しました");
+}
 function authHeaders(): HeadersInit {
   const token = typeof window !== "undefined" ? localStorage.getItem("ascend_token") || "" : "";
   return token ? { "Content-Type": "application/json", Authorization: `Bearer ${token}` } : { "Content-Type": "application/json" };
@@ -91,7 +98,18 @@ function DiagnosisPageInner() {
           if (urlTab === "comparison") {
             setOptions(_stored);
           } else if (urlTab === "contradiction") {
-            setStrategy(_stored);
+            const _parts = (_stored || "").split("---ASCEND_CONTRADICTION_SPLIT---");
+
+            if (_parts.length >= 3) {
+              setInputText((_parts[0] || "").trim());
+              setStrategy((_parts[1] || "").trim());
+              setPolicy((_parts[2] || "").trim());
+            } else {
+              setInputText(_stored || "");
+              setStrategy("");
+              setPolicy("");
+            }
+
           } else {
             setInputMap(m => ({...m, [urlTab]: _stored}));
           }
@@ -1478,7 +1496,7 @@ function DiagnosisPageInner() {
               ):(
                 structureHistory.map((h:any,i:number)=>(
                   <div key={i} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"12px",padding:"14px 16px",marginBottom:"8px"}}>
-                    <p style={{fontSize:"11px",color:C.textSub,marginBottom:"4px"}}>{h.created_at ? new Date(h.created_at).toLocaleString("ja-JP") : ""}</p>
+                    <p style={{fontSize:"11px",color:C.textSub,marginBottom:"4px"}}>{h.created_at ? new Date(h.created_at).toLocaleString("ja-JP",{timeZone:"Asia/Tokyo",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}) : ""}</p>
                     <p style={{fontSize:"13px",color:C.textMain,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginBottom:"8px"}}>{String(h.input_text||"").slice(0,60)}{String(h.input_text||"").length>60?"…":""}</p>
                     <div style={{display:"flex",gap:"6px"}}>
                       <button onClick={()=>{setConsultResult(h.result);setActiveAnalysisType("structure");}} style={{fontSize:"11px",color:"#4f46e5",background:"none",border:"1px solid #4f46e5",borderRadius:"6px",padding:"3px 10px",cursor:"pointer"}}>開く</button>
@@ -1516,12 +1534,18 @@ function DiagnosisPageInner() {
                 <div style={{padding:"18px",fontSize:"15px",color:C.textSub}}>保存済みレポートはありません</div>
               ):(
                 issueHistory.map((h:any)=>(
-                  <div key={h.doc_id} style={{padding:"16px 18px",borderBottom:`1px solid ${C.border}`,cursor:"pointer"}} onClick={()=>{setConsultResult(h.result);setActiveAnalysisType("issue");}}>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:"6px"}}>
-                      <p style={{fontSize:"16px",fontWeight:700,color:C.textMain}}>🎯 課題仮説</p>
-                      <p style={{fontSize:"12px",color:C.textSub}}>{String(h.created_at||"")}</p>
+                  <div key={h.doc_id} style={{padding:"16px 18px",borderBottom:`1px solid ${C.border}`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"6px"}}>
+                      <p style={{fontSize:"16px",fontWeight:700,color:C.textMain,cursor:"pointer"}} onClick={()=>{setConsultResult(h.result);setActiveAnalysisType("issue");}}>🎯 課題仮説</p>
+                      <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
+                        <p style={{fontSize:"12px",color:C.textSub}}>{h.created_at ? new Date(h.created_at).toLocaleString("ja-JP",{timeZone:"Asia/Tokyo",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}) : ""}</p>
+                        <button onClick={async(e)=>{e.stopPropagation();if(!confirm("この履歴を削除しますか？"))return;await deleteIssueHistory(h.doc_id);setIssueHistory(prev=>prev.filter((x:any)=>x.doc_id!==h.doc_id));}}
+                          style={{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:"8px",color:"#ef4444",fontSize:"11px",fontWeight:700,padding:"2px 8px",cursor:"pointer"}}>
+                          🗑️ 削除
+                        </button>
+                      </div>
                     </div>
-                    <p style={{fontSize:"14px",color:C.textSub,lineHeight:"1.7"}}>{String(h.input_text||"")}</p>
+                    <p style={{fontSize:"14px",color:C.textSub,lineHeight:"1.7",cursor:"pointer"}} onClick={()=>{setConsultResult(h.result);setActiveAnalysisType("issue");}}>{String(h.input_text||"")}</p>
                   </div>
                 ))
               )}

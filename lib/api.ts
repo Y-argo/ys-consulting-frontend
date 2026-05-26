@@ -795,3 +795,142 @@ export async function saveNotificationSettings(settings: Record<string,boolean|s
     throw new Error(data.error || data.detail || "通知設定の保存に失敗しました");
   }
 }
+
+export async function deleteIssueHistory(doc_id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/diagnosis/issue_history/${doc_id}`, {
+    method: "DELETE",
+    headers: authHeaders() as Record<string, string>,
+  });
+  if (!res.ok) throw new Error("削除に失敗しました");
+}
+
+// ── Agent Mode ──────────────────────────────────────────────────────
+export interface AgentTask {
+  task_id: string;
+  tenant_id: string;
+  user_uid: string;
+  agent_type: string;
+  operation_type: string;
+  industry: string;
+  status: "PENDING" | "APPROVED" | "RUNNING" | "DONE" | "REJECTED" | "FAILED";
+  payload: Record<string, unknown>;
+  preview: {
+    agent_type: string;
+    operation_type: string;
+    industry: string;
+    entity_label: string;
+    summary: string;
+    payload_preview: Record<string, unknown>;
+  };
+  approved_by: string | null;
+  approved_at: string | null;
+  scheduled_at: string | null;
+  result: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface AgentLog {
+  log_id: string;
+  task_id: string;
+  tenant_id: string;
+  operator_uid: string;
+  agent_type: string;
+  operation_type: string;
+  before_state: Record<string, unknown>;
+  after_state: Record<string, unknown>;
+  success: boolean;
+  error_message: string;
+  executed_at: string;
+}
+
+export async function createAgentTask(params: {
+  agent_type: string;
+  operation_type: string;
+  industry: string;
+  payload: Record<string, unknown>;
+  scheduled_at?: string;
+}): Promise<{ task_id: string; status: string; preview: AgentTask["preview"] }> {
+  const res = await fetch(`${API_BASE}/api/agent/task/create`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+    body: JSON.stringify(params),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "タスク作成に失敗しました");
+  return data;
+}
+
+export async function approveAgentTask(task_id: string): Promise<{ task_id: string; status: string }> {
+  const res = await fetch(`${API_BASE}/api/agent/task/approve`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+    body: JSON.stringify({ task_id }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "承認に失敗しました");
+  return data;
+}
+
+export async function rejectAgentTask(task_id: string, reason?: string): Promise<{ task_id: string; status: string }> {
+  const res = await fetch(`${API_BASE}/api/agent/task/reject`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+    body: JSON.stringify({ task_id, reason }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "却下に失敗しました");
+  return data;
+}
+
+export async function executeAgentTask(task_id: string): Promise<{ task_id: string; status: string; result: Record<string, unknown> }> {
+  const res = await fetch(`${API_BASE}/api/agent/task/execute/${task_id}`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "実行に失敗しました");
+  return data;
+}
+
+export async function listAgentTasks(params?: { status?: string; agent_type?: string }): Promise<{ tasks: AgentTask[]; count: number }> {
+  const q = new URLSearchParams();
+  if (params?.status) q.set("status", params.status);
+  if (params?.agent_type) q.set("agent_type", params.agent_type);
+  const res = await fetch(`${API_BASE}/api/agent/task/list?${q.toString()}`, {
+    headers: authHeaders() as Record<string, string>,
+  });
+  const data = await res.json().catch(() => ({ tasks: [], count: 0 }));
+  return data;
+}
+
+export async function getAgentTask(task_id: string): Promise<AgentTask> {
+  const res = await fetch(`${API_BASE}/api/agent/task/${task_id}`, {
+    headers: authHeaders() as Record<string, string>,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "タスク取得に失敗しました");
+  return data;
+}
+
+export async function listAgentLogs(params?: { agent_type?: string }): Promise<{ logs: AgentLog[]; count: number }> {
+  const q = new URLSearchParams();
+  if (params?.agent_type) q.set("agent_type", params.agent_type);
+  const res = await fetch(`${API_BASE}/api/agent/log/list?${q.toString()}`, {
+    headers: authHeaders() as Record<string, string>,
+  });
+  const data = await res.json().catch(() => ({ logs: [], count: 0 }));
+  return data;
+}
+
+export async function getAgentIndustryTemplates(): Promise<{
+  templates: Record<string, Record<string, string>>;
+  agent_types: string[];
+  operation_types: string[];
+}> {
+  const res = await fetch(`${API_BASE}/api/agent/industry_templates`, {
+    headers: authHeaders() as Record<string, string>,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "テンプレート取得に失敗しました");
+  return data;
+}
