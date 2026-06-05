@@ -812,7 +812,7 @@ export interface AgentTask {
   agent_type: string;
   operation_type: string;
   industry: string;
-  status: "PENDING" | "APPROVED" | "RUNNING" | "DONE" | "REJECTED" | "FAILED";
+  status: "PENDING" | "APPROVED" | "RUNNING" | "DONE" | "REJECTED" | "FAILED" | "WAITING_MAPPING" | "WAITING_EXECUTOR" | "BLOCKED";
   payload: Record<string, unknown>;
   preview: {
     agent_type: string;
@@ -822,11 +822,35 @@ export interface AgentTask {
     summary: string;
     payload_preview: Record<string, unknown>;
   };
+  op_id?: string;
+  entity_type?: string;
+  op_snapshot?: {
+    op_id: string;
+    display_name: string;
+    category: string;
+    operation_type: string;
+    entity_type: string;
+    industry: string;
+    payload_schema_version: string;
+  };
   approved_by: string | null;
   approved_at: string | null;
   scheduled_at: string | null;
   result: Record<string, unknown> | null;
   created_at: string;
+  // P14
+  operation_steps?: {
+    step_id: string;
+    step_type: string;
+    order: number;
+    required?: boolean;
+    selector_key?: string;
+    payload_key?: string;
+    url_key?: string;
+    submit_selector_key?: string;
+    timeout?: number;
+    duration?: number;
+  }[];
 }
 
 export interface AgentLog {
@@ -841,14 +865,20 @@ export interface AgentLog {
   success: boolean;
   error_message: string;
   executed_at: string;
+  self_heal_attempted?: boolean;
+  self_heal_success?: boolean;
+  self_heal_retry_succeeded?: boolean;
 }
 
 export async function createAgentTask(params: {
   agent_type: string;
   operation_type: string;
-  industry: string;
+  industry?: string;
+  entity_type?: string;
+  op_id?: string;
   payload: Record<string, unknown>;
   scheduled_at?: string;
+  media_mapping_id?: string;
 }): Promise<{ task_id: string; status: string; preview: AgentTask["preview"] }> {
   const res = await fetch(`${API_BASE}/api/agent/task/create`, {
     method: "POST",
@@ -858,6 +888,28 @@ export async function createAgentTask(params: {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || "タスク作成に失敗しました");
   return data;
+}
+
+export async function planAgentTask(params: {
+  instruction: string;
+  mapping_id?: string;
+}): Promise<{
+  ok: boolean;
+  ready: boolean;
+  media_name?: string;
+  op_id?: string;
+  operation_type?: string;
+  payload?: Record<string, unknown>;
+  preview?: string;
+  question?: string;
+}> {
+  const res = await fetch(`${API_BASE}/api/agent/plan`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "plan failed");
+  return res.json();
 }
 
 export async function approveAgentTask(task_id: string): Promise<{ task_id: string; status: string }> {
@@ -933,4 +985,548 @@ export async function getAgentIndustryTemplates(): Promise<{
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || "テンプレート取得に失敗しました");
   return data;
+}
+
+
+// ── Agent Mode 追加関数 ──────────────────────────────────────────────────────
+
+export interface AgentOp {
+  op_id: string;
+  display_name: string;
+  description?: string;
+  category: string;
+  industry?: string;
+  entity_type?: string;
+  operation_type?: string;
+  allowed_plans: string[];
+  requires_approval?: boolean;
+  active?: boolean;
+  invalid_reason?: string;
+  payload_schema?: {
+    fields: Array<{
+      key: string;
+      label: string;
+      type: "text" | "textarea" | "select" | "file" | "datetime" | "number" | "boolean";
+      required: boolean;
+      options?: string[];
+    }>;
+  };
+  created_at?: string;
+}
+
+export interface MediaMapping {
+  mapping_id: string;
+  tenant_id: string;
+  media_name: string;
+  media_url: string;
+  login_url?: string | null;
+  auth_type?: string | null;
+  operation_type?: string | null;
+  credential_secret_name?: string | null;
+  verify_selector?: string | null;
+  dom_selectors: Record<string, string>;
+  form_structure: Record<string, unknown>;
+  last_verified_at: string | null;
+  login_health?: string | null;
+  created_at: string;
+  capabilities?: { can_login?: boolean; can_upload_image?: boolean; can_post_news?: boolean; can_update_text?: boolean; can_verify?: boolean; } | null;
+  industry?: string | null;
+  selector_repair_suggestions?: {
+    created_at?: string;
+    operation_type?: string;
+    failed_selectors?: string[];
+    suggested_selectors?: { suggested_selector: string; tag?: string; name?: string; id?: string }[];
+    cleared_at?: string;
+    applied?: boolean;
+  } | null;
+  previous_selectors?: Record<string, string> | null;
+  last_selector_repair_applied_at?: string | null;
+  capabilities_candidate?: {
+    created_at?: string;
+    capabilities?: Record<string, boolean>;
+    reason?: Record<string, string>;
+    cleared_at?: string;
+    applied?: boolean;
+  } | null;
+  previous_capabilities?: Record<string, boolean> | null;
+  semantic_selector_candidates?: {
+    created_at?: string;
+    labels?: Record<string, string>;
+    confidence?: Record<string, string>;
+    cleared_at?: string;
+    applied?: boolean;
+    applied_keys?: string[];
+  } | null;
+  last_semantic_selector_applied_at?: string | null;
+  last_capabilities_applied_at?: string | null;
+  selector_rankings?: {
+    computed_at?: string | { _seconds: number };
+    operation_type?: string;
+    ranked_selectors?: {
+      selector: string;
+      score: number;
+      reasons: string[];
+      source: string;
+      label?: string;
+    }[];
+  } | null;
+  agent_learning_health?: {
+    computed_at?: string;
+    execution_count?: number;
+    success_count?: number;
+    failed_count?: number;
+    success_rate?: number;
+    avg_execution_time_ms?: number;
+    selector_success_rate_avg?: number | null;
+    most_common_failure?: string;
+    last_failure_at?: string | null;
+    last_success_at?: string | null;
+    recommendations?: string[];
+  } | null;
+}
+
+export interface AgentSchedule {
+  schedule_id: string;
+  tenant_id: string;
+  op_id: string;
+  cron_expr: string;
+  payload_template: Record<string, unknown>;
+  enabled: boolean;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  created_at: string;
+}
+
+export async function listAgentOps(): Promise<{ ops: AgentOp[]; count: number }> {
+  const res = await fetch(`${API_BASE}/api/agent/ops`, {
+    headers: authHeaders() as Record<string, string>,
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "ops取得失敗");
+  return res.json();
+}
+
+export async function createMediaMapping(params: {
+  media_name: string;
+  media_url: string;
+  login_url?: string;
+  industry?: string;
+  dom_selectors?: Record<string, string>;
+  form_structure?: Record<string, unknown>;
+  capabilities?: { can_login?: boolean; can_upload_image?: boolean; can_post_news?: boolean; can_update_text?: boolean; can_verify?: boolean; };
+}): Promise<{ mapping_id: string; status: string }> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "媒体マッピング作成失敗");
+  return res.json();
+}
+
+export async function listMediaMappings(): Promise<{ mappings: MediaMapping[]; count: number }> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map`, {
+    headers: authHeaders() as Record<string, string>,
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "媒体マッピング取得失敗");
+  return res.json();
+}
+
+export async function deleteMediaMapping(mapping_id: string): Promise<{ mapping_id: string; status: string }> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mapping_id}`, {
+    method: "DELETE",
+    headers: authHeaders() as Record<string, string>,
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "媒体マッピング削除失敗");
+  return res.json();
+}
+
+export async function createAgentSchedule(params: {
+  op_id: string;
+  cron_expr: string;
+  payload_template?: Record<string, unknown>;
+  enabled?: boolean;
+}): Promise<{ schedule_id: string; status: string }> {
+  const res = await fetch(`${API_BASE}/api/agent/schedule/create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "スケジュール作成失敗");
+  return res.json();
+}
+
+export async function listAgentSchedules(): Promise<{ schedules: AgentSchedule[]; count: number }> {
+  const res = await fetch(`${API_BASE}/api/agent/schedule/list`, {
+    headers: authHeaders() as Record<string, string>,
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "スケジュール取得失敗");
+  return res.json();
+}
+
+export async function updateAgentSchedule(
+  schedule_id: string,
+  enabled: boolean
+): Promise<{ schedule_id: string; enabled: boolean }> {
+  const res = await fetch(`${API_BASE}/api/agent/schedule/${schedule_id}?enabled=${enabled}`, {
+    method: "PATCH",
+    headers: authHeaders() as Record<string, string>,
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "スケジュール更新失敗");
+  return res.json();
+}
+
+
+export async function saveMediaCredential(mapping_id: string, login_id: string, password: string): Promise<{ status: string; mapping_id: string; credential_registered: boolean }> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mapping_id}/credential`, {
+    method: "PATCH",
+    headers: { ...(authHeaders() as Record<string, string>), "Content-Type": "application/json" },
+    body: JSON.stringify({ login_id, password }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "ログイン情報の保存に失敗しました");
+  return data;
+}
+
+export async function updateMediaSelectors(
+  mapping_id: string,
+  dom_selectors: { username: string; password: string; login_submit: string; [key: string]: string },
+  verify_selector?: string
+): Promise<{ mapping_id: string; status: string }> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mapping_id}/selectors`, {
+    method: "PATCH",
+    headers: { ...(authHeaders() as Record<string, string>), "Content-Type": "application/json" },
+    body: JSON.stringify({ dom_selectors, form_structure: {}, verify_selector: verify_selector || null }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "セレクター設定の保存に失敗しました");
+  return data;
+}
+
+export async function loginCheckMediaMapping(mapping_id: string): Promise<{
+  mapping_id: string;
+  status: string;
+  login_checked: boolean;
+  login_success: boolean;
+  message: string;
+}> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mapping_id}/login_check`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || data.message || data.error || "ログイン確認失敗");
+  return data;
+}
+
+export async function applySelectorRepair(
+  mapping_id: string,
+  approved_selectors: Record<string, string>
+): Promise<{
+  mapping_id: string;
+  applied_keys: string[];
+  previous_selectors: Record<string, string>;
+  status: string;
+}> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mapping_id}/selector_repair/apply`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" } as Record<string, string>,
+    body: JSON.stringify({ approved_selectors }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "selector修復候補の適用に失敗しました");
+  return data;
+}
+
+export async function applyCapabilities(
+  mapping_id: string,
+  approved_capabilities: Record<string, boolean>
+): Promise<{
+  mapping_id: string;
+  applied_keys: string[];
+  previous_capabilities: Record<string, boolean>;
+  status: string;
+}> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mapping_id}/capabilities/apply`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" } as Record<string, string>,
+    body: JSON.stringify({ approved_capabilities }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "capability候補の適用に失敗しました");
+  return data;
+}
+
+export async function applySemanticSelector(
+  mapping_id: string,
+  approved_labels: Record<string, boolean>
+): Promise<{
+  mapping_id: string;
+  applied_keys: string[];
+  previous_selectors: Record<string, string>;
+  status: string;
+}> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mapping_id}/semantic_selector/apply`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" } as Record<string, string>,
+    body: JSON.stringify({ approved_labels }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "意味推定selectorの適用に失敗しました");
+  return data;
+}
+export async function recomputeLearningHealth(mapping_id: string): Promise<{
+  mapping_id: string;
+  status: string;
+  health: {
+    computed_at: string;
+    execution_count: number;
+    success_count: number;
+    failed_count: number;
+    success_rate: number;
+    avg_execution_time_ms: number;
+    selector_success_rate_avg: number | null;
+    most_common_failure: string;
+    last_failure_at: string | null;
+    last_success_at: string | null;
+    recommendations: string[];
+  };
+}> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mapping_id}/learning/recompute`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "健康度の再計算に失敗しました");
+  return data;
+}
+export async function recomputeSelectorRanking(mapping_id: string): Promise<{
+  mapping_id: string;
+  status: string;
+  ranked_count: number;
+  selector_rankings: {
+    computed_at: string;
+    operation_type: string;
+    ranked_selectors: {
+      selector: string;
+      score: number;
+      reasons: string[];
+      source: string;
+      label?: string;
+    }[];
+  };
+}> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mapping_id}/selector_rank/recompute`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "selectorランキングの再計算に失敗しました");
+  return data;
+}
+
+// ── P20 Workflow Session Control ──────────────────────────────────────────────
+
+export interface WorkflowSession {
+  session_id: string;
+  workflow_id: string;
+  goal: string;
+  approval_state: string;
+  status: string;
+  risk_level: string;
+  current_phase: string;
+  current_step: string;
+  paused: boolean;
+  cancelled: boolean;
+  interruptible: boolean;
+  execution_policy: Record<string, unknown>;
+  adaptive_branch_history: Array<Record<string, unknown>>;
+}
+
+export async function approveWorkflowSession(session_id: string): Promise<{ session_id: string; status: string }> {
+  const res = await fetch(`${API_BASE}/api/agent/workflow/approve`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+    body: JSON.stringify({ session_id }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "承認に失敗しました");
+  return data;
+}
+
+export async function rejectWorkflowSession(session_id: string): Promise<{ session_id: string; status: string }> {
+  const res = await fetch(`${API_BASE}/api/agent/workflow/reject`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+    body: JSON.stringify({ session_id }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "却下に失敗しました");
+  return data;
+}
+
+export async function pauseWorkflowSession(session_id: string): Promise<{ session_id: string; status: string }> {
+  const res = await fetch(`${API_BASE}/api/agent/workflow/pause`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+    body: JSON.stringify({ session_id }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "一時停止に失敗しました");
+  return data;
+}
+
+export async function resumeWorkflowSession(session_id: string): Promise<{ session_id: string; status: string }> {
+  const res = await fetch(`${API_BASE}/api/agent/workflow/resume`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+    body: JSON.stringify({ session_id }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "再開に失敗しました");
+  return data;
+}
+
+export async function cancelWorkflowSession(session_id: string): Promise<{ session_id: string; status: string }> {
+  const res = await fetch(`${API_BASE}/api/agent/workflow/cancel`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+    body: JSON.stringify({ session_id }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "キャンセルに失敗しました");
+  return data;
+}
+
+export async function getWorkflowSession(session_id: string): Promise<WorkflowSession> {
+  const res = await fetch(`${API_BASE}/api/agent/workflow/session/${encodeURIComponent(session_id)}`, {
+    headers: authHeaders() as Record<string, string>,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "セッション取得に失敗しました");
+  return data;
+}
+
+export async function createWorkflowSession(params: {
+  workflow_id?: string;
+  goal: string;
+  instruction?: string;
+  mapping_id?: string;
+  execution_policy?: Record<string, unknown>;
+}): Promise<WorkflowSession> {
+  const res = await fetch(`${API_BASE}/api/agent/workflow/session/create`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+    body: JSON.stringify(params),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "ワークフロー作成に失敗しました");
+  return data;
+}
+
+export async function listWorkflowSessions(): Promise<{ sessions: WorkflowSession[]; count: number }> {
+  const res = await fetch(`${API_BASE}/api/agent/workflow/session/list`, {
+    headers: authHeaders() as Record<string, string>,
+  });
+  const data = await res.json().catch(() => ({ sessions: [], count: 0 }));
+  return data;
+}
+
+export async function scanMediaDom(
+  mapping_id: string,
+  max_pages?: number,
+  options?: {
+    start_url?: string;
+    include_patterns?: string[];
+    exclude_patterns?: string[];
+    reset_resume?: boolean;
+  }
+): Promise<Record<string, unknown>> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${encodeURIComponent(mapping_id)}/dom_scan`, {
+    method: "POST",
+    headers: { ...(authHeaders() as Record<string, string>), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      max_pages: max_pages ?? 200,
+      start_url: options?.start_url ?? "",
+      include_patterns: options?.include_patterns ?? [],
+      exclude_patterns: options?.exclude_patterns ?? [],
+      reset_resume: options?.reset_resume ?? false,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || data.message || "DOMスキャンに失敗しました");
+  return data;
+}
+
+export async function deepScanOperation(
+  mapping_id: string,
+  operation_type: string,
+  hint_url: string = ""
+): Promise<{
+  mapping_id: string;
+  operation_type: string;
+  result: {
+    status: string;
+    target_url?: string;
+    selectors?: Record<string, string>;
+    missing?: string[];
+    confidence?: string;
+    last_scanned_at?: string;
+    error?: string;
+  };
+}> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mapping_id}/operation/${operation_type}/deep_scan`, {
+    method: "POST",
+    headers: { ...(authHeaders() as Record<string, string>), "Content-Type": "application/json" },
+    body: JSON.stringify({ hint_url }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("ASCENDに再ログインしてください");
+    throw new Error(data.detail || data.message || data.error || "deep_scan失敗");
+  }
+  return data;
+}
+
+
+export async function multiDeepScan(
+  mapping_id: string
+): Promise<{
+  ok: boolean;
+  operations_count: number;
+  ready: string[];
+  partial: string[];
+  needs_mapping: string[];
+  waiting: string[];
+  failed: string[];
+  results: {
+    operation_type: string;
+    status: string;
+    missing: string[];
+    target_url?: string;
+    error_reason?: string;
+  }[];
+}> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mapping_id}/multi_deep_scan`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("ASCENDに再ログインしてください");
+    throw new Error(data.detail || data.message || data.error || "multi_deep_scan失敗");
+  }
+  return { ok: true, ...data };
+}
+
+export async function updateCapabilities(
+  mapping_id: string,
+  capabilities: Record<string, boolean>
+): Promise<{ mapping_id: string; capabilities: Record<string, boolean>; status: string }> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mapping_id}/capabilities`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ capabilities }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
 }

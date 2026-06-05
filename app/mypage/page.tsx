@@ -59,7 +59,7 @@ import {
   getNotifications, markNotificationRead, markAllNotificationsRead, saveNotificationSettings,
 } from "@/lib/api";
 import AdBanner from "@/components/AdBanner";
-type Tab = "overview"|"metrics"|"fc"|"dm"|"logs"|"rankup"|"manual"|"guide"|"about"|"cookie"|"settings"|"gallery"|"presentation"|"notifications";
+type Tab = "overview"|"metrics"|"fc"|"dm"|"logs"|"rankup"|"manual"|"guide"|"about"|"cookie"|"settings"|"gallery"|"presentation"|"notifications"|"agent";
 const C = {
   bg:"#f8f9fc", card:"#ffffff", primary:"#4f46e5", primary2:"#7c3aed",
   textMain:"#111827", textSub:"#6b7280", textMuted:"#9ca3af",
@@ -192,6 +192,7 @@ function MyPageInner() {
     {id:"presentation" as Tab,label:"📊 診断・分析"},
     {id:"notifications" as Tab,label:"🔔 通知", badge: notifUnread},
     {id:"cookie",label:"🍪 Cookie"},
+    ...(features?.agent_mode===true ? [{id:"agent" as Tab,label:"🤖 エージェント設定"}] : []),
     {id:"settings",label:"⚙️ 設定"},
   ] as {id:Tab;label:string;badge?:number}[];
   return (
@@ -1346,6 +1347,102 @@ function MyPageInner() {
         )}
 
         {/* 設定 */}
+        {tab==="agent" && (
+          <div style={{display:"flex",flexDirection:"column",gap:16}}>
+            <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:16,padding:24}}>
+              <div style={{fontWeight:700,fontSize:16,marginBottom:4,color:C.textMain}}>🤖 エージェント設定</div>
+              <div style={{fontSize:13,color:C.textMuted,marginBottom:20}}>媒体マッピング・スケジュール・タスク管理はエージェントページで行います。</div>
+              <button onClick={()=>window.location.href="/agent"}
+                style={{width:"100%",padding:"14px",borderRadius:12,border:"none",background:`linear-gradient(135deg,${C.primary},${C.primary2})`,color:"#fff",fontWeight:700,fontSize:15,cursor:"pointer",boxShadow:C.shadowPrimary}}>
+                🤖 エージェントページへ →
+              </button>
+            </div>
+            <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:16,padding:24}}>
+              <div style={{fontWeight:700,fontSize:16,marginBottom:4,color:C.textMain}}>🤖 ASCEND Agent OS</div>
+              <div style={{fontSize:12,color:C.textMuted,marginBottom:16,lineHeight:1.7}}>
+                自然言語指示を、安全な実行タスクへ変換する<br/>承認制エージェント実行基盤
+              </div>
+
+              <div style={{fontWeight:700,fontSize:13,marginBottom:8,color:C.textMain}}>⚙ 実行フロー</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:16,alignItems:"center"}}>
+                {["指示","Operation解析","Preview生成","承認","Executor実行","検証","ログ保存","学習"].map((s,i,arr)=>(
+                  <div key={s} style={{display:"flex",alignItems:"center",gap:6}}>
+                    <span style={{padding:"4px 10px",borderRadius:20,fontSize:11,fontWeight:600,background:"var(--color-background-tertiary)",color:C.textMain}}>{s}</span>
+                    {i<arr.length-1&&<span style={{color:C.textMuted,fontSize:11}}>→</span>}
+                  </div>
+                ))}
+              </div>
+              <div style={{fontSize:11,color:C.textMuted,marginBottom:20,lineHeight:1.7}}>
+                単なる自動化ではなく、すべての実行を構造化・検証・記録する。
+              </div>
+
+              <div style={{fontWeight:700,fontSize:13,marginBottom:8,color:C.textMain}}>🧩 Operation Layer</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
+                {["Entity登録","情報更新","画像差し替え","スケジュール更新","ステータス変更","投稿生成","差分検知","更新監査"].map(op=>(
+                  <span key={op} style={{padding:"4px 10px",borderRadius:20,fontSize:11,fontWeight:600,background:`${C.primary}18`,color:C.primary,border:`1px solid ${C.primary}44`}}>{op}</span>
+                ))}
+              </div>
+              <div style={{fontSize:11,color:C.textMuted,marginBottom:20,lineHeight:1.7}}>
+                業種固定ではなく、Entity / Operation 抽象構造で動作。夜職・美容・不動産・小売などを同じ実行構造で扱う。
+              </div>
+
+              <div style={{fontWeight:700,fontSize:13,marginBottom:8,color:C.textMain}}>🛡 Safety Architecture</div>
+              <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:8}}>
+                {["実行前Preview","承認制Execution","capability制御","retry / rollback","selector自己修復","execution verification","Secret Manager隔離","全ログ保存"].map(t=>(
+                  <div key={t} style={{display:"flex",gap:8,alignItems:"center",fontSize:12,color:C.textMuted}}>
+                    <span style={{color:"#7c3aed",fontWeight:700}}>✓</span>{t}
+                  </div>
+                ))}
+              </div>
+              <div style={{fontSize:11,color:"#b91c1c",marginBottom:20,fontWeight:600}}>
+                「完全自動化」ではなく、必ず承認境界を経由して実行される。
+              </div>
+
+              <div style={{fontWeight:700,fontSize:13,marginBottom:8,color:C.textMain}}>📡 Task Status</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
+                {[
+                  {s:"PENDING",c:"#b87d00"},{s:"APPROVED",c:"#15803d"},{s:"RUNNING",c:"#1a6fa8"},
+                  {s:"DONE",c:"#15803d"},{s:"BLOCKED",c:"#b91c1c"},{s:"WAITING_MAPPING",c:"#c2410c"},{s:"FAILED",c:"#b91c1c"}
+                ].map(({s,c})=>(
+                  <span key={s} style={{padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:700,color:c,background:`${c}18`,border:`1px solid ${c}44`}}>{s}</span>
+                ))}
+              </div>
+              <div style={{fontSize:11,color:C.textMuted,marginBottom:20,lineHeight:1.7}}>
+                なぜ止まったか、何が不足しているかを可視化する。
+              </div>
+
+              <div style={{fontWeight:700,fontSize:13,marginBottom:8,color:C.textMain}}>🔌 Executor Layer</div>
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {[
+                  {icon:"🌐",title:"Browser Executor",desc:"Playwrightによる実ブラウザ操作"},
+                  {icon:"⚡",title:"API Executor",desc:"REST API経由での直接実行"},
+                  {icon:"✋",title:"Manual Approval Executor",desc:"人間承認を必須とする高リスク操作"},
+                ].map(item=>(
+                  <div key={item.title} style={{display:"flex",gap:10,alignItems:"flex-start",padding:"10px 12px",background:"var(--color-background-tertiary)",borderRadius:10}}>
+                    <span style={{fontSize:18}}>{item.icon}</span>
+                    <div>
+                      <div style={{fontWeight:600,fontSize:13,color:C.textMain,marginBottom:2}}>{item.title}</div>
+                      <div style={{fontSize:11,color:C.textMuted}}>{item.desc}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div style={{fontSize:11,color:C.textMuted,marginTop:10,lineHeight:1.7}}>
+                媒体差異はcapabilityとmappingで吸収。媒体別if分岐は持たない。
+              </div>
+            </div>
+            <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:16,padding:20}}>
+              <div style={{fontWeight:700,fontSize:14,marginBottom:8,color:C.textMain}}>⚠️ 絶対条件</div>
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {["すべての実行は必ずユーザー承認が必要","完全自動実行はしない（許可済みOpのみ）","実行ログは全件保存・取消不可","APEX/ULTRAプランのみ利用可能"].map(t=>(
+                  <div key={t} style={{fontSize:13,color:C.textMuted,display:"flex",gap:8,alignItems:"center"}}>
+                    <span style={{color:"#7c3aed",fontWeight:700}}>✓</span>{t}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
         {tab==="settings" && (
           <div className="space-y-4">
             {/* 通知設定 */}

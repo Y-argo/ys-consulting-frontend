@@ -80,6 +80,9 @@ export default function AscendAboutPage() {
         { name: "プラン管理", desc: "ご利用プランの確認・変更", url: "/plan" },
         { name: "用途別モード切替", desc: "用途に応じて柔軟にモード切替", url: "/chat" },
       ] },
+    { icon: "🤖", title: "エージェント", items: [
+        { name: "🤖 エージェントモード", desc: "媒体マッピング・スケジュール・タスク管理を自律実行するエージェント機能です。", url: "/agent", flag: "agent_mode" },
+      ] },
     { icon: "🚀", title: "AIエンジン（3段階）", items: [
         { name: "⚡ SWIFT（迅速）", desc: "高速レスポンス・AUTO/7モード対応。日常的な戦略相談・施策整理に最適で、常時ご利用可能です。", url: "/chat" },
         { name: "✨ ADVANCE（高度）", desc: "全19モード対応の高精度エンジン。ファイル診断・固定概念レポート・画像生成・個人相談などが解放されます。", url: "/chat", flag: "ascend_ultra" },

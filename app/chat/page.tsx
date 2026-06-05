@@ -69,6 +69,7 @@ export default function ChatPage() {
   const [apexEnabled, setApexEnabled] = useState(false);
   const [hasInvestSignal, setHasInvestSignal] = useState(false);
   const [imageGenerationEnabled, setImageGenerationEnabled] = useState(false);
+  const [agentModeEnabled, setAgentModeEnabled] = useState(false);
   const [decisionMetricsEnabled, setDecisionMetricsEnabled] = useState(true);
   const [displaySuggestions, setDisplaySuggestions] = useState(true);
   const [displayScore, setDisplayScore] = useState(true);
@@ -77,7 +78,7 @@ export default function ChatPage() {
   const [usageLogs, setUsageLogs] = useState<{prompt:string;timestamp:string}[]>([]);
   const [purposeMode, setPurposeMode] = useState("AUTO");
   const [displayModeBar, setDisplayModeBar] = useState(true);
-  const [chatMode, setChatMode] = useState<"talk"|"consult">("consult");
+  const [chatMode, setChatMode] = useState<"talk"|"consult"|"agent">("consult");
   const [modal, setModal] = useState<Modal>("none");
   const [modalContent, setModalContent] = useState("");
   const [renameVal, setRenameVal] = useState("");
@@ -115,18 +116,18 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
-    const savedMode = localStorage.getItem("ascend_chat_mode");
     const savedModeBar = localStorage.getItem("ascend_display_mode_bar");
     if (savedModeBar !== null) setDisplayModeBar(savedModeBar === "true");
     const savedSugg = localStorage.getItem("ascend_display_suggestions");
     if (savedSugg !== null) setDisplaySuggestions(savedSugg === "true");
     const savedScore = localStorage.getItem("ascend_display_score");
     if (savedScore !== null) setDisplayScore(savedScore === "true");
-    if (savedMode === "talk" || savedMode === "consult") setChatMode(savedMode);
     setLeftOpen(window.innerWidth >= 768);
     const user = getStoredUser();
     if (!user) { router.push("/"); return; }
     setUid(user.uid);
+    const savedMode = localStorage.getItem("ascend_chat_mode_" + user.uid);
+    if (savedMode === "talk" || savedMode === "consult" || savedMode === "agent") setChatMode(savedMode as "talk"|"consult"|"agent");
     listSessions().then(s => {
       const merged = [...s];
       if (merged.length > 0) {
@@ -148,6 +149,7 @@ export default function ChatPage() {
       setApexEnabled(hasApex);
       setHasInvestSignal(!!f.diag_investment);
       setImageGenerationEnabled(!!f.image_generation);
+      setAgentModeEnabled(!!f.agent_mode);
       setDecisionMetricsEnabled(f.decision_metrics!==false);
       const savedTier = localStorage.getItem("ascend_ai_tier_default");
       if (savedTier === "ultra" && hasUltra) setAiTier("ultra");
@@ -254,7 +256,9 @@ export default function ChatPage() {
       !!_lastGeneratedImage?.data &&
       /編集|修正|変更|変えて|変える|色|背景|追加|削除|除去|切り取|合成|スタイル|明る|暗く|文字|テキスト|ロゴ|ここ|この部分|ここの/i.test(sendText);
     const _isNewImageReq2 =
-      /画像|イメージ|イラスト|絵|写真|ロゴ|アイコン|バナー|デザイン|ビジュアル|描いて|作って|生成|作成|image|picture|photo|illustration|logo|banner|design|visual|draw|create|generate/i.test(sendText);
+      /画像|イメージ|イラスト|絵|ロゴ|アイコン|バナー|デザイン|ビジュアル|描いて|作って|image|illustration|logo|banner|design|visual|draw/i.test(sendText) ||
+      /写真.*(作って|生成|描いて|作る|ください|して)/i.test(sendText) ||
+      /(生成|作成|create|generate|render).*(画像|写真|image|photo)/i.test(sendText);
     const _isImageReq2 = _isImgAttach || _isImageEditReq2 || _isNewImageReq2;
     const _isInvestReq2 = /投資|銘柄|株|相場|シグナル|GOAL_BOTTOM|WATCH|底打ち|反発|買い|売り/i.test(sendText);
 
@@ -345,7 +349,9 @@ export default function ChatPage() {
     setLoadingStep(0);
     const _stepTimer = setInterval(()=>{setLoadingStep(s=>Math.min(s+1,5));setLoadingLabel("");},600);
     try {
-      const _isImageReq2 = /画像|イラスト|絵|写真|生成|作成|描いて|デザイン|ビジュアル|visual|image|picture|photo|illustration|generate|create|draw/i.test(text);
+      const _isImageReq2 = /画像|イラスト|絵|ロゴ|アイコン|バナー|デザイン|ビジュアル|描いて|作って|image|illustration|logo|banner|design|visual|draw/i.test(text) ||
+        /写真.*(作って|生成|描いて|作る|ください|して)/i.test(text) ||
+        /(生成|作成|create|generate|render).*(画像|写真|image|photo)/i.test(text);
       const _isInvestReq2 = /投資|銘柄|株|相場|シグナル|GOAL_BOTTOM|WATCH|底打ち|反発|買い|売り/i.test(text);
       let res;
       const _onStep2 = (label: string) => { clearInterval(_stepTimer); const _sm: Record<string,number> = {"入力を解析中...":0,"意図を特定中...":1,"ナレッジを検索中...":2,"専用ナレッジを検索中...":2,"回答を構築中...":3,"構造を解析中...":4,"回答を整形中...":5,"最終調整中...":5}; const _si = _sm[label]; if (_si !== undefined) setLoadingStep(_si); setLoadingLabel(label); };
@@ -728,6 +734,20 @@ export default function ChatPage() {
               </button>
             ))}
           </div>
+          )}
+          {/* エージェントモードバナー */}
+          {chatMode==="agent" && agentModeEnabled && (
+            <div style={{background:"#7c3aed11",borderBottom:"1px solid #7c3aed33",padding:"8px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexShrink:0}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:16}}>🤖</span>
+                <span style={{fontSize:13,fontWeight:600,color:"#7c3aed"}}>エージェントモード</span>
+                <span style={{fontSize:12,color:"var(--color-text-secondary)"}}>タスクを指示 → 承認 → 実行の流れで動作します</span>
+              </div>
+              <button onClick={()=>window.location.href="/agent"}
+                style={{fontSize:12,padding:"4px 12px",borderRadius:6,border:"1px solid #7c3aed",background:"none",color:"#7c3aed",cursor:"pointer",fontWeight:600,whiteSpace:"nowrap",flexShrink:0}}>
+                タスク管理 →
+              </button>
+            </div>
           )}
           {/* フィードバックトースト */}
           {feedbackToast && (
@@ -1354,7 +1374,7 @@ export default function ChatPage() {
                 <div style={{display:"flex",alignItems:"flex-start",gap:"4px"}}>
                   <textarea value={input} onChange={e=>{setInput(e.target.value);if(typeof window!=="undefined")localStorage.setItem("ascend_input_draft",e.target.value);}}
                     onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();handleSend(e as unknown as React.FormEvent);}}}
-                    disabled={loading} placeholder={chatMode==="talk" ? "💬 会話モードでコンサルタントに相談... (Shift+Enterで改行)" : "🎯 相談モードでコンサルタントに相談... (Shift+Enterで改行)"}
+                    disabled={loading} placeholder={chatMode==="talk" ? "💬 会話モードでコンサルタントに相談... (Shift+Enterで改行)" : chatMode==="agent" ? "🤖 エージェントモード - タスクを指示してください... (Shift+Enterで改行)" : "🎯 相談モードでコンサルタントに相談... (Shift+Enterで改行)"}
                     rows={1} style={{background:"transparent",resize:"none",minHeight:"36px",maxHeight:"160px",color:C.textMain,flex:1}}
                     className="text-sm px-2 py-1.5 focus:outline-none placeholder-gray-400 disabled:opacity-50 leading-relaxed"
                   />
@@ -1368,16 +1388,23 @@ export default function ChatPage() {
                   </button>
                 </div>
                 <div style={{display:"flex",flexDirection:"row",gap:"4px",alignItems:"center"}}>
-                  <button type="button" onClick={()=>{setChatMode("talk");localStorage.setItem("ascend_chat_mode","talk");}}
+                  <button type="button" onClick={()=>{setChatMode("talk");localStorage.setItem("ascend_chat_mode_"+uid,"talk");}}
                     style={{borderRadius:"6px",fontSize:"13px",padding:"3px 6px",transition:"all 0.2s",border:"none",cursor:"pointer",lineHeight:1,
                       background:chatMode==="talk"?"#6366f1":"rgba(0,0,0,0.04)",
                       boxShadow:chatMode==="talk"?"0 0 0 2px #6366f1":"none"}}
                     title="会話モード">💬</button>
-                  <button type="button" onClick={()=>{setChatMode("consult");localStorage.setItem("ascend_chat_mode","consult");}}
+                  <button type="button" onClick={()=>{setChatMode("consult");localStorage.setItem("ascend_chat_mode_"+uid,"consult");}}
                     style={{borderRadius:"6px",fontSize:"13px",padding:"3px 6px",transition:"all 0.2s",border:"none",cursor:"pointer",lineHeight:1,
                       background:chatMode==="consult"?"#4f46e5":"rgba(0,0,0,0.04)",
                       boxShadow:chatMode==="consult"?"0 0 0 2px #4f46e5":"none"}}
                     title="相談モード">🎯</button>
+                  {agentModeEnabled&&(
+                  <button type="button" onClick={()=>{setChatMode("agent");localStorage.setItem("ascend_chat_mode_"+uid,"agent");}}
+                    style={{borderRadius:"6px",fontSize:"13px",padding:"3px 6px",transition:"all 0.2s",border:"none",cursor:"pointer",lineHeight:1,
+                      background:chatMode==="agent"?"#7c3aed":"rgba(0,0,0,0.04)",
+                      boxShadow:chatMode==="agent"?"0 0 0 2px #7c3aed":"none"}}
+                    title="エージェントモード">🤖</button>
+                  )}
                   <button type="button" onClick={()=>fileRef.current?.click()} disabled={attachLoading}
                     style={{borderRadius:"6px",fontSize:"13px",padding:"3px 6px",border:"none",cursor:"pointer",lineHeight:1,background:"rgba(0,0,0,0.04)",color:C.textMuted}}
                     className="hover:text-indigo-500 transition-all disabled:opacity-50" title="ファイル添付">

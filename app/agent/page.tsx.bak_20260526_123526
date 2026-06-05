@@ -1,0 +1,1037 @@
+"use client";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import {
+  getStoredUser, listAgentTasks, executeAgentTask, createAgentTask, listAgentLogs,
+  listMediaMappings, createMediaMapping, deleteMediaMapping, loginCheckMediaMapping, saveMediaCredential, updateMediaSelectors,
+  listAgentSchedules, createAgentSchedule, updateAgentSchedule,
+  listAgentOps,
+  AgentTask, AgentLog, MediaMapping, AgentSchedule, AgentOp,
+} from "@/lib/api";
+
+type PayloadField = {
+  key: string;
+  label: string;
+  type: "text" | "textarea" | "select" | "file" | "datetime" | "number" | "boolean";
+  required: boolean;
+  options?: string[];
+};
+type OpWithSchema = AgentOp;
+
+const STATUS_LABEL: Record<string, string> = {
+  PENDING: "承認待ち", APPROVED: "実行待ち", RUNNING: "実行中",
+  DONE: "完了", REJECTED: "却下", FAILED: "失敗",
+  WAITING_MAPPING: "サイト接続が必要", WAITING_EXECUTOR: "準備中", BLOCKED: "情報不足",
+};
+const STATUS_COLOR: Record<string, string> = {
+  PENDING: "#b87d00", APPROVED: "#1a6fa8", RUNNING: "#7c3aed",
+  DONE: "#15803d", REJECTED: "#6b7280", FAILED: "#b91c1c",
+  WAITING_MAPPING: "#c2410c", WAITING_EXECUTOR: "#7c3aed", BLOCKED: "#b91c1c",
+};
+const OP_LABEL: Record<string, string> = {
+  entity_register: "キャスト登録", entity_update: "キャスト情報更新", media_replace: "写真差し替え",
+  text_update: "テキスト更新", schedule_update: "出勤更新", price_update: "料金更新",
+  news_post: "ニュース投稿", status_update: "ステータス更新",
+};
+
+function cronToJa(cron: string): string {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 5) return cron;
+  const [min, hour, , , dow] = parts;
+  const days = ["日", "月", "火", "水", "木", "金", "土"];
+  if (dow === "*") return `毎日 ${hour.padStart(2,"0")}:${min.padStart(2,"0")}`;
+  const d = parseInt(dow);
+  if (!isNaN(d) && d >= 0 && d <= 6) return `毎週 ${days[d]}曜 ${hour.padStart(2,"0")}:${min.padStart(2,"0")}`;
+  return cron;
+}
+
+function translateError(msg: string): string {
+  if (!msg) return "";
+  if (msg.includes("credential_secret_name") || msg.includes("credential未設定")) return "ログイン情報が未登録です";
+  // selector不足・設定未完了（ID/PASSミスと区別）
+  if (
+    msg.includes("ログイン用セレクターが不足") ||
+    msg.includes("selector not found") ||
+    msg.includes("ログインフォーム設定") ||
+    msg.includes("セレクター") ||
+    msg.includes("不足しています")
+  ) return "ログインID・パスワードの問題ではなく、ログインフォーム設定が未登録または不正です";
+  // selector構造変更（設定はあるが要素が見つからない）
+  if (msg.includes("verify_selector") || msg.includes("selector")) return "サイト構造変更により接続確認に失敗しました";
+  if (msg.includes("login") || msg.includes("ログイン失敗")) return "ログインに失敗しました。ID・パスワードをご確認ください";
+  if (msg.includes("timeout")) return "接続タイムアウトが発生しました";
+  if (msg.includes("mapping")) return "サイト接続設定が見つかりません";
+  return msg;
+}
+
+type Tab = "sites" | "tasks" | "schedule" | "logs" | "health";
+
+export default function AgentPage() {
+  const router = useRouter();
+  const [mounted, setMounted] = useState(false);
+  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+  const [tab, setTab] = useState<Tab>("sites");
+  const [tasks, setTasks] = useState<AgentTask[]>([]);
+  const [logs, setLogs] = useState<AgentLog[]>([]);
+  const [mappings, setMappings] = useState<MediaMapping[]>([]);
+  const [schedules, setSchedules] = useState<AgentSchedule[]>([]);
+  const [ops, setOps] = useState<OpWithSchema[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [selectedTask, setSelectedTask] = useState<AgentTask | null>(null);
+  const [loginCheckResults, setLoginCheckResults] = useState<Record<string, {login_success: boolean; message: string}>>({});
+
+  // サイト接続ウィザード
+  const [wizardStep, setWizardStep] = useState(1);
+  const [siteName, setSiteName] = useState("");
+  const [siteUrl, setSiteUrl] = useState("");
+  const [siteLoginId, setSiteLoginId] = useState("");
+  const [siteLoginPass, setSiteLoginPass] = useState("");
+  const [wizardConnecting, setWizardConnecting] = useState(false);
+  const [wizardTestResult, setWizardTestResult] = useState<{ok: boolean; msg: string} | null>(null);
+  const [createdMappingId, setCreatedMappingId] = useState<string>("");
+  const [selectorUsername, setSelectorUsername] = useState("");
+  const [selectorPassword, setSelectorPassword] = useState("");
+  const [selectorSubmit, setSelectorSubmit] = useState("");
+  const [selectorVerify, setSelectorVerify] = useState("");
+  const [selectorSaving, setSelectorSaving] = useState(false);
+
+  // ログイン情報登録モーダル
+  const [loginRegModal, setLoginRegModal] = useState<MediaMapping | null>(null);
+  const [selectorModal, setSelectorModal] = useState<MediaMapping | null>(null);
+  const [loginRegId, setLoginRegId] = useState("");
+  const [loginRegPass, setLoginRegPass] = useState("");
+  const [loginRegLoading, setLoginRegLoading] = useState(false);
+
+  // 自動化作成（動的フォーム）
+  const [selectedOpId, setSelectedOpId] = useState("");
+  const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [creating, setCreating] = useState(false);
+
+  // スケジュール
+  const [scheduleOpId, setScheduleOpId] = useState("");
+  const [scheduleHour, setScheduleHour] = useState("9");
+  const [scheduleMin, setScheduleMin] = useState("0");
+  const [scheduleDow, setScheduleDow] = useState("*");
+
+  useEffect(() => { setMounted(true); }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+    const u = getStoredUser();
+    if (!u || !u.token) { router.replace("/"); return; }
+    (async () => {
+      try {
+        await listAgentTasks();
+        setHasPermission(true);
+        fetchAll();
+      } catch (e: unknown) {
+        const err = e as Error;
+        if (err.message && (err.message.includes("権限") || err.message.includes("403"))) {
+          setHasPermission(false);
+        } else {
+          setHasPermission(true);
+          fetchAll();
+        }
+      }
+    })();
+  }, [mounted]);
+
+  async function fetchAll() {
+    setLoading(true);
+    try {
+      const [td, ld, md, sd, od] = await Promise.allSettled([
+        listAgentTasks(), listAgentLogs(), listMediaMappings(),
+        listAgentSchedules(), listAgentOps(),
+      ]);
+      if (td.status === "fulfilled") setTasks(td.value.tasks);
+      if (ld.status === "fulfilled") setLogs(ld.value.logs);
+      if (md.status === "fulfilled") setMappings(md.value.mappings);
+      if (sd.status === "fulfilled") setSchedules(sd.value.schedules);
+      if (od.status === "fulfilled") {
+        const validOps = (od.value.ops || []).filter((o: OpWithSchema) => o.active !== false);
+        setOps(validOps);
+        if (validOps.length > 0) {
+          setScheduleOpId(validOps[0].op_id || "");
+          setSelectedOpId(validOps[0].op_id || "");
+        }
+      }
+    } finally { setLoading(false); }
+  }
+
+  async function handleExecute(task_id: string) {
+    try {
+      await executeAgentTask(task_id);
+      setMsg("実行しました");
+      const d = await listAgentTasks();
+      setTasks(d.tasks);
+    } catch (e: unknown) { setMsg((e as Error).message); }
+  }
+
+  async function handleCreate() {
+    const selectedOp = ops.find(o => o.op_id === selectedOpId);
+    if (!selectedOp) { setMsg("自動化内容を選択してください"); return; }
+    if (selectedOp.active === false) { setMsg("このOperationは現在利用できません"); return; }
+    // 必須フィールドチェック
+    const fields = selectedOp.payload_schema?.fields || [];
+    for (const f of fields) {
+      if (f.required && !formValues[f.key]) {
+        setMsg(`「${f.label}」を入力してください`);
+        return;
+      }
+    }
+    setCreating(true);
+    try {
+      await createAgentTask({
+        agent_type: selectedOp.category || "hp_update",
+        operation_type: selectedOp.operation_type || "",
+        industry: selectedOp.industry || "generic",
+        entity_type: selectedOp.entity_type || "",
+        op_id: selectedOp.op_id || "",
+        payload: { ...formValues },
+      });
+      setMsg("自動化を追加しました");
+      setFormValues({});
+      setSelectedOpId("");
+      const d = await listAgentTasks();
+      setTasks(d.tasks);
+      setTab("tasks");
+    } catch (e: unknown) { setMsg((e as Error).message); }
+    finally { setCreating(false); }
+  }
+
+  // ウィザードSTEP3: 接続テスト
+  async function handleWizardTest() {
+    if (!createdMappingId) return;
+    // selector未設定チェック
+    if (!selectorUsername || !selectorPassword || !selectorSubmit) {
+      setWizardTestResult({ ok: false, msg: "ログインフォーム設定が未登録です。下のフォームを入力してください" });
+      return;
+    }
+    setWizardConnecting(true);
+    setWizardTestResult(null);
+    try {
+      // selector保存
+      await updateMediaSelectors(
+        createdMappingId,
+        { username: selectorUsername, password: selectorPassword, login_submit: selectorSubmit },
+        selectorVerify || undefined
+      );
+      const r = await loginCheckMediaMapping(createdMappingId);
+      setWizardTestResult({ ok: r.login_success, msg: r.login_success ? "接続に成功しました" : translateError(r.message) });
+    } catch (e: unknown) {
+      setWizardTestResult({ ok: false, msg: translateError((e as Error).message) });
+    } finally { setWizardConnecting(false); }
+  }
+
+  // ウィザードSTEP1→2: サイト情報登録
+  async function handleWizardStep1() {
+    if (!siteName || !siteUrl) { setMsg("サイト名とURLを入力してください"); return; }
+    setWizardConnecting(true);
+    try {
+      const r = await createMediaMapping({ media_name: siteName, media_url: siteUrl, login_url: siteUrl });
+      const newId = (r as Record<string,string>).mapping_id || "";
+      if (!newId) { setMsg("サイト接続の作成に失敗しました。もう一度お試しください"); return; }
+      // listMediaMappings で存在確認
+      const latest = await listMediaMappings();
+      const exists = latest.mappings.some(m => m.mapping_id === newId);
+      if (!exists) {
+        setMsg("サイト接続の作成確認に失敗しました。もう一度お試しください");
+        setCreatedMappingId("");
+        return;
+      }
+      setMappings(latest.mappings);
+      setCreatedMappingId(newId);
+      setWizardStep(2);
+      setMsg("");
+    } catch (e: unknown) { setMsg((e as Error).message); }
+    finally { setWizardConnecting(false); }
+  }
+
+  function resetWizard() {
+    setWizardStep(1); setSiteName(""); setSiteUrl("");
+    setSiteLoginId(""); setSiteLoginPass(""); setWizardTestResult(null); setCreatedMappingId("");
+    setSelectorUsername(""); setSelectorPassword(""); setSelectorSubmit(""); setSelectorVerify("");
+  }
+
+  // 長期未実行チェック（7日以上実行なし）
+  const longInactiveSites = mappings.filter(m => {
+    if (!m.last_verified_at) return true;
+    const diff = Date.now() - new Date(m.last_verified_at).getTime();
+    return diff > 7 * 24 * 60 * 60 * 1000;
+  });
+
+  const totalSites = mappings.length;
+  const activeSites = mappings.filter(m => m.last_verified_at).length;
+  const errorSites = mappings.filter(m => !m.credential_secret_name).length;
+  const todayLogs = logs.filter(l => {
+    if (!l.executed_at) return false;
+    return new Date(l.executed_at).toDateString() === new Date().toDateString();
+  }).length;
+
+  if (!mounted) return null;
+
+  if (hasPermission === false) {
+    return (
+      <div style={{ minHeight: "100vh", background: "var(--color-background-tertiary)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <div style={{ background: "var(--color-background-secondary)", border: "1px solid var(--color-border-tertiary)", borderRadius: 16, padding: 40, maxWidth: 400, width: "100%", textAlign: "center" }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
+          <h2 style={{ fontSize: 18, fontWeight: 600, color: "var(--color-text-primary)", marginBottom: 8 }}>ご利用いただけません</h2>
+          <p style={{ fontSize: 14, color: "var(--color-text-secondary)", lineHeight: 1.7, marginBottom: 24 }}>
+            AI自動運営アシスタントはAPEX・ULTRAプランのお客様のみご利用いただける機能です。
+          </p>
+          <button onClick={() => router.push("/plan")}
+            style={{ padding: "10px 24px", borderRadius: 8, border: "none", background: "#7c3aed", color: "#fff", fontWeight: 600, fontSize: 14, cursor: "pointer" }}>
+            プランを確認する
+          </button>
+          <button onClick={() => router.back()}
+            style={{ display: "block", margin: "12px auto 0", padding: "8px 24px", borderRadius: 8, border: "1px solid var(--color-border-secondary)", background: "none", color: "var(--color-text-secondary)", fontSize: 14, cursor: "pointer" }}>
+            戻る
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (hasPermission === null) {
+    return (
+      <div style={{ minHeight: "100vh", background: "var(--color-background-tertiary)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ color: "var(--color-text-secondary)", fontSize: 14 }}>確認中...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: "var(--color-background-tertiary)", padding: "20px 16px" }}>
+      <div style={{ maxWidth: 820, margin: "0 auto" }}>
+
+        {/* ヘッダー */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+          <button onClick={() => router.back()} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: "var(--color-text-secondary)" }}>←</button>
+          <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, color: "var(--color-text-primary)", flex: 1 }}>🤖 AI自動運営アシスタント</h1>
+          <span style={{ fontSize: 11, background: "#7c3aed22", color: "#7c3aed", borderRadius: 6, padding: "2px 8px", fontWeight: 600 }}>BETA</span>
+          <button onClick={() => { setTab("tasks"); }}
+            style={{ padding: "7px 16px", borderRadius: 8, border: "none", background: "#7c3aed", color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>
+            ＋ 新しい自動化
+          </button>
+        </div>
+        <p style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 16, marginLeft: 28 }}>サイト更新・媒体投稿・求人更新などを自動化できます。</p>
+
+        {/* 統計カード */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 18 }}>
+          {[
+            { label: "接続サイト数", sub: "登録済みの接続先", value: totalSites, icon: "🌐", alert: false },
+            { label: "接続確認済み", sub: "正常にログインできています", value: activeSites, icon: "✅", alert: false },
+            { label: "要確認", sub: "接続エラーがあります", value: errorSites, icon: "⚠️", alert: errorSites > 0 },
+            { label: "本日の実行", sub: "今日の自動実行回数", value: todayLogs, icon: "⚡", alert: false },
+          ].map(c => (
+            <div key={c.label} style={{ background: "var(--color-background-secondary)", border: `1px solid ${c.alert ? "#c2410c44" : "var(--color-border-tertiary)"}`, borderRadius: 10, padding: "12px", textAlign: "center" }}>
+              <div style={{ fontSize: 20, marginBottom: 2 }}>{c.icon}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: c.alert ? "#c2410c" : "var(--color-text-primary)", lineHeight: 1 }}>{c.value}</div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-primary)", marginTop: 3 }}>{c.label}</div>
+              <div style={{ fontSize: 10, color: c.alert ? "#c2410c" : "var(--color-text-tertiary)", marginTop: 1 }}>{c.sub}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* メッセージ */}
+        {msg && (
+          <div style={{ background: "var(--color-background-secondary)", border: "1px solid var(--color-border-primary)", borderRadius: 8, padding: "9px 14px", marginBottom: 12, fontSize: 13, color: "var(--color-text-primary)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span>{msg}</span>
+            <button onClick={() => setMsg("")} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-secondary)", fontSize: 16, lineHeight: 1 }}>×</button>
+          </div>
+        )}
+
+        {/* タブ */}
+        <div style={{ display: "flex", gap: 0, marginBottom: 16, borderBottom: "1px solid var(--color-border-tertiary)", overflowX: "auto" }}>
+          {([
+            { key: "sites", label: "① サイト接続" },
+            { key: "tasks", label: "② 自動更新" },
+            { key: "schedule", label: "③ 実行予約" },
+            { key: "logs", label: "④ 実行履歴" },
+            { key: "health", label: "⑤ 異常通知" },
+          ] as {key: Tab; label: string}[]).map(t => (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              style={{ padding: "8px 14px", background: "none", border: "none", borderBottom: tab === t.key ? "2px solid #7c3aed" : "2px solid transparent", cursor: "pointer", fontWeight: tab === t.key ? 700 : 400, color: tab === t.key ? "#7c3aed" : "var(--color-text-secondary)", fontSize: 13, whiteSpace: "nowrap", transition: "all 0.15s" }}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* ① サイト接続 */}
+        {tab === "sites" && (
+          <div>
+            {/* ウィザードフォーム */}
+            <div style={{ background: "var(--color-background-secondary)", border: "1px solid var(--color-border-tertiary)", borderRadius: 12, padding: 20, marginBottom: 16 }}>
+              {/* ステップインジケーター */}
+              <div style={{ display: "flex", alignItems: "center", gap: 0, marginBottom: 18 }}>
+                {[1,2,3,4].map((s, i) => (
+                  <div key={s} style={{ display: "flex", alignItems: "center", flex: i < 3 ? 1 : "none" }}>
+                    <div style={{ width: 28, height: 28, borderRadius: "50%", background: wizardStep >= s ? "#7c3aed" : "var(--color-background-tertiary)", color: wizardStep >= s ? "#fff" : "var(--color-text-tertiary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, flexShrink: 0, border: wizardStep === s ? "2px solid #7c3aed" : "none" }}>
+                      {wizardStep > s ? "✓" : s}
+                    </div>
+                    <div style={{ fontSize: 11, color: wizardStep >= s ? "#7c3aed" : "var(--color-text-tertiary)", marginLeft: 4, whiteSpace: "nowrap" }}>
+                      {["サイト情報", "ログイン情報", "接続確認", "完了"][s-1]}
+                    </div>
+                    {i < 3 && <div style={{ flex: 1, height: 1, background: wizardStep > s ? "#7c3aed" : "var(--color-border-tertiary)", margin: "0 8px" }} />}
+                  </div>
+                ))}
+              </div>
+
+              {/* STEP1 */}
+              {wizardStep === 1 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-primary)", marginBottom: 4 }}>自動化するサイトの情報を入力してください</div>
+                  <input value={siteName} onChange={e => setSiteName(e.target.value)} placeholder="サイト名（例：体入ドラフト）"
+                    style={{ padding: "9px 12px", borderRadius: 8, border: "1px solid var(--color-border-secondary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", fontSize: 14 }} />
+                  <input value={siteUrl} onChange={e => setSiteUrl(e.target.value)} placeholder="ログインページのURL（例：https://...）"
+                    style={{ padding: "9px 12px", borderRadius: 8, border: "1px solid var(--color-border-secondary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", fontSize: 14 }} />
+                  <button onClick={handleWizardStep1}
+                    style={{ padding: "9px 20px", borderRadius: 8, border: "none", background: "#7c3aed", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 14, alignSelf: "flex-start" }}>
+                    次へ →
+                  </button>
+                </div>
+              )}
+
+              {/* STEP2 */}
+              {wizardStep === 2 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-primary)", marginBottom: 4 }}>サイトへ自動ログインするためのID・パスワードを登録してください</div>
+                  <div style={{ fontSize: 12, color: "var(--color-text-secondary)", background: "var(--color-background-tertiary)", borderRadius: 8, padding: "8px 12px" }}>
+                    🔒 入力した情報は暗号化して安全に保存されます。外部に送信されることはありません。
+                  </div>
+                  <input value={siteLoginId} onChange={e => setSiteLoginId(e.target.value)} placeholder="ログインID（メールアドレス等）"
+                    style={{ padding: "9px 12px", borderRadius: 8, border: "1px solid var(--color-border-secondary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", fontSize: 14 }} />
+                  <input type="password" value={siteLoginPass} onChange={e => setSiteLoginPass(e.target.value)} placeholder="パスワード"
+                    style={{ padding: "9px 12px", borderRadius: 8, border: "1px solid var(--color-border-secondary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", fontSize: 14 }} />
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => setWizardStep(1)}
+                      style={{ padding: "9px 16px", borderRadius: 8, border: "1px solid var(--color-border-secondary)", background: "none", color: "var(--color-text-secondary)", cursor: "pointer", fontSize: 14 }}>
+                      ← 戻る
+                    </button>
+                    <button onClick={async () => {
+                      if (!siteLoginId || !siteLoginPass) { setMsg("IDとパスワードを入力してください"); return; }
+                      if (!createdMappingId) { setMsg("サイト情報が未登録です。STEP1からやり直してください"); return; }
+                      setWizardConnecting(true);
+                      try {
+                        // mappings に createdMappingId が存在するか確認
+                        let exists = mappings.some(m => m.mapping_id === createdMappingId);
+                        if (!exists) {
+                          const latest = await listMediaMappings();
+                          setMappings(latest.mappings);
+                          exists = latest.mappings.some(m => m.mapping_id === createdMappingId);
+                        }
+                        if (!exists) {
+                          setMsg("サイト接続情報が見つかりません。STEP1からやり直してください");
+                          setCreatedMappingId("");
+                          setWizardStep(1);
+                          return;
+                        }
+                        await saveMediaCredential(createdMappingId, siteLoginId, siteLoginPass);
+                        setSiteLoginId(""); setSiteLoginPass("");
+                        await fetchAll();
+                        setWizardStep(3); setMsg("");
+                      } catch (e: unknown) {
+                        const err = e as Error;
+                        if (err.message && err.message.includes("404")) {
+                          setMsg("サイト接続情報が見つかりません。STEP1からやり直してください");
+                          setCreatedMappingId("");
+                          setWizardStep(1);
+                        } else {
+                          setMsg(err.message);
+                        }
+                      } finally { setWizardConnecting(false); }
+                    }} disabled={wizardConnecting}
+                      style={{ padding: "9px 20px", borderRadius: 8, border: "none", background: wizardConnecting ? "#9ca3af" : "#7c3aed", color: "#fff", fontWeight: 700, cursor: wizardConnecting ? "not-allowed" : "pointer", fontSize: 14 }}>
+                      {wizardConnecting ? "保存中..." : "次へ →"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* STEP3 */}
+              {wizardStep === 3 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-primary)" }}>接続テストを実行してください</div>
+                  <div style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>登録したID・パスワードで実際にログインできるか確認します。</div>
+                  {!mappings.find(m => m.mapping_id === createdMappingId)?.credential_secret_name && (
+                    <div style={{ fontSize: 12, padding: "8px 12px", borderRadius: 8, background: "#b91c1c11", border: "1px solid #b91c1c44", color: "#b91c1c" }}>
+                      ⚠️ ログイン情報が未登録です。STEP2に戻って登録してください。
+                    </div>
+                  )}
+                  <div style={{ background: "var(--color-background-tertiary)", borderRadius: 8, padding: "12px 14px" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "var(--color-text-primary)", marginBottom: 8 }}>ログインフォーム設定（CSS セレクター）</div>
+                    <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 8 }}>ブラウザの開発者ツールで各フォーム要素のCSSセレクターを確認して入力してください。</div>
+                    {[
+                      { label: "IDフィールド", placeholder: 'input[name="email"]', val: selectorUsername, set: setSelectorUsername, required: true },
+                      { label: "パスワードフィールド", placeholder: 'input[name="password"]', val: selectorPassword, set: setSelectorPassword, required: true },
+                      { label: "ログインボタン", placeholder: 'button[type="submit"]', val: selectorSubmit, set: setSelectorSubmit, required: true },
+                      { label: "ログイン確認要素（任意）", placeholder: '.user-menu', val: selectorVerify, set: setSelectorVerify, required: false },
+                    ].map(f => (
+                      <div key={f.label} style={{ marginBottom: 8 }}>
+                        <label style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-secondary)", display: "block", marginBottom: 3 }}>
+                          {f.label}{f.required && <span style={{ color: "#b91c1c", marginLeft: 2 }}>*</span>}
+                        </label>
+                        <input value={f.val} onChange={e => f.set(e.target.value)} placeholder={f.placeholder}
+                          style={{ width: "100%", padding: "6px 10px", borderRadius: 6, border: "1px solid var(--color-border-secondary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", fontSize: 12, fontFamily: "monospace", boxSizing: "border-box" }} />
+                      </div>
+                    ))}
+                  </div>
+                  {wizardTestResult && (
+                    <div style={{ padding: "10px 14px", borderRadius: 8, background: wizardTestResult.ok ? "#15803d11" : "#b91c1c11", border: `1px solid ${wizardTestResult.ok ? "#15803d44" : "#b91c1c44"}`, color: wizardTestResult.ok ? "#15803d" : "#b91c1c", fontSize: 13, fontWeight: 500 }}>
+                      {wizardTestResult.ok ? "✅ " : "❌ "}{wizardTestResult.msg}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => setWizardStep(2)}
+                      style={{ padding: "9px 16px", borderRadius: 8, border: "1px solid var(--color-border-secondary)", background: "none", color: "var(--color-text-secondary)", cursor: "pointer", fontSize: 14 }}>
+                      ← 戻る
+                    </button>
+                    <button onClick={handleWizardTest} disabled={wizardConnecting}
+                      style={{ padding: "9px 20px", borderRadius: 8, border: "none", background: wizardConnecting ? "#9ca3af" : "#1a6fa8", color: "#fff", fontWeight: 700, cursor: wizardConnecting ? "not-allowed" : "pointer", fontSize: 14 }}>
+                      {wizardConnecting ? "確認中..." : "🔍 接続テスト"}
+                    </button>
+                    <button onClick={() => { setWizardStep(4); fetchAll(); }}
+                      style={{ padding: "9px 20px", borderRadius: 8, border: "none", background: "#15803d", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
+                      {wizardTestResult?.ok ? "接続して自動化開始 →" : "スキップして保存"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* STEP4 */}
+              {wizardStep === 4 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center", padding: "12px 0" }}>
+                  <div style={{ fontSize: 36 }}>🎉</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "var(--color-text-primary)" }}>「{siteName}」の接続が完了しました</div>
+                  <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>次は「② 自動更新」タブから自動化内容を設定してください。</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={resetWizard}
+                      style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid var(--color-border-secondary)", background: "none", color: "var(--color-text-secondary)", cursor: "pointer", fontSize: 13 }}>
+                      別のサイトを追加
+                    </button>
+                    <button onClick={() => { setTab("tasks"); resetWizard(); }}
+                      style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: "#7c3aed", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
+                      自動化を設定する →
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 接続済みサイト一覧 */}
+            {mappings.length === 0 ? (
+              <div style={{ textAlign: "center", padding: 40, color: "var(--color-text-secondary)" }}>
+                <div style={{ fontSize: 36, marginBottom: 10 }}>🌐</div>
+                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>まだサイト接続がありません</div>
+                <div style={{ fontSize: 12 }}>上のフォームから最初のサイトを追加してください</div>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {mappings.map(m => {
+                  const hasCredential = !!m.credential_secret_name;
+                  const isVerified = !!m.last_verified_at;
+                  const checkResult = loginCheckResults[m.mapping_id];
+                  const connStatus = checkResult ? (checkResult.login_success ? "ok" : "error") : (isVerified ? "ok" : hasCredential ? "warn" : "error");
+                  const isConfigError = checkResult && !checkResult.login_success && (
+                    checkResult.message.includes("セレクター") ||
+                    checkResult.message.includes("不足") ||
+                    checkResult.message.includes("selector") ||
+                    checkResult.message.includes("ログインフォーム設定")
+                  );
+                  const statusInfo = {
+                    ok: { label: "🟢 正常", color: "#15803d", sub: "正常にログインできています" },
+                    warn: { label: "🟡 要確認", color: "#b87d00", sub: "接続確認が必要です" },
+                    error: { label: isConfigError ? "🔴 ログインフォーム設定未完了" : "🔴 ログイン失敗", color: "#b91c1c", sub: isConfigError ? "ログインフォーム設定を確認してください" : "ログイン情報を確認してください" }
+                  }[connStatus];
+                  return (
+                    <div key={m.mapping_id} style={{ background: "var(--color-background-secondary)", border: "1px solid var(--color-border-tertiary)", borderRadius: 12, padding: "14px 16px" }}>
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: "var(--color-text-primary)" }}>{m.media_name}</div>
+                          <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginTop: 2 }}>{m.media_url}</div>
+                        </div>
+                        <div style={{ textAlign: "right", flexShrink: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: statusInfo.color }}>{statusInfo.label}</div>
+                          <div style={{ fontSize: 10, color: statusInfo.color, marginTop: 1 }}>{statusInfo.sub}</div>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 6, fontSize: 11, color: "var(--color-text-tertiary)", marginBottom: 10, flexWrap: "wrap" }}>
+                        {m.last_verified_at && <span>最終確認: {new Date(m.last_verified_at).toLocaleString("ja-JP")}</span>}
+                        {logs.filter(l => l.success).length > 0 && <span>最終成功: {new Date(Math.max(...logs.filter(l=>l.success).map(l=>new Date(l.executed_at||0).getTime()))).toLocaleString("ja-JP")}</span>}
+                      </div>
+                      {!hasCredential && (
+                        <div style={{ background: "#b91c1c11", border: "1px solid #b91c1c44", borderRadius: 8, padding: "8px 12px", marginBottom: 8 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#b91c1c", marginBottom: 4 }}>⚠️ ログイン情報が未設定です</div>
+                          <div style={{ fontSize: 11, color: "#b91c1c", marginBottom: 6 }}>サイトへ自動ログインするためのID・パスワードを登録してください</div>
+                          <button onClick={() => { setLoginRegModal(m); setLoginRegId(""); setLoginRegPass(""); }}
+                            style={{ padding: "5px 12px", borderRadius: 6, border: "none", background: "#b91c1c", color: "#fff", fontWeight: 600, cursor: "pointer", fontSize: 12 }}>
+                            ログイン情報を登録
+                          </button>
+                        </div>
+                      )}
+                      {checkResult && (
+                        <div style={{ fontSize: 12, padding: "6px 10px", borderRadius: 6, marginBottom: 8, background: checkResult.login_success ? "#15803d11" : "#b91c1c11", color: checkResult.login_success ? "#15803d" : "#b91c1c", border: `1px solid ${checkResult.login_success ? "#15803d44" : "#b91c1c44"}` }}>
+                          {checkResult.login_success ? "✅ " : "❌ "}{translateError(checkResult.message)}
+                        </div>
+                      )}
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button onClick={() => {
+                          router.push(`/agent/selector?id=${m.mapping_id}&name=${encodeURIComponent(m.media_name)}`);
+                        }} style={{ padding: "5px 12px", borderRadius: 6, border: "1px solid #b87d00", background: "none", color: "#b87d00", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                          ⚙️ ログインフォーム設定
+                        </button>
+                        <button onClick={async () => {
+                          const ds = m.dom_selectors || {};
+                          if (!ds.username || !ds.password || !ds.login_submit) {
+                            setLoginCheckResults(prev => ({
+                              ...prev,
+                              [m.mapping_id]: {
+                                login_success: false,
+                                message: "ログインフォーム設定が未登録です。先にログインフォーム設定を保存してください"
+                              }
+                            }));
+                            setMsg("ログインフォーム設定が未登録です");
+                            return;
+                          }
+                          try {
+                            setMsg("接続確認中...");
+                            const r = await loginCheckMediaMapping(m.mapping_id);
+                            setLoginCheckResults(prev => ({ ...prev, [m.mapping_id]: { login_success: r.login_success, message: r.message } }));
+                            setMsg("");
+                          } catch (e: unknown) { setMsg((e as Error).message); }
+                        }} style={{ padding: "5px 12px", borderRadius: 6, border: "1px solid #7c3aed", background: "none", color: "#7c3aed", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                          🔍 接続確認
+                        </button>
+                        <button onClick={async () => {
+                          if (!window.confirm("このサイト接続を削除しますか？")) return;
+                          try {
+                            await deleteMediaMapping(m.mapping_id);
+                            setMsg("削除しました");
+                            const d = await listMediaMappings();
+                            setMappings(d.mappings);
+                          } catch (e: unknown) { setMsg((e as Error).message); }
+                        }} style={{ padding: "5px 12px", borderRadius: 6, border: "1px solid var(--color-border-secondary)", background: "none", color: "#b91c1c", cursor: "pointer", fontSize: 12 }}>
+                          削除
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ② 自動更新 */}
+        {tab === "tasks" && (
+          <div>
+            <div style={{ background: "var(--color-background-secondary)", border: "1px solid var(--color-border-tertiary)", borderRadius: 12, padding: 18, marginBottom: 14 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10, color: "var(--color-text-primary)" }}>＋ 自動更新を追加</div>
+              {ops.length === 0 ? (
+                <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>利用可能な自動化がありません</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <select value={selectedOpId} onChange={e => { setSelectedOpId(e.target.value); setFormValues({}); }}
+                    style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid var(--color-border-secondary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", fontSize: 14 }}>
+                    <option value="">自動化の種類を選択してください</option>
+                    {ops.map(op => (
+                      <option key={op.op_id} value={op.op_id || ""}>{op.display_name || op.op_id}</option>
+                    ))}
+                  </select>
+                  {selectedOpId && (() => {
+                    const selOp = ops.find(o => o.op_id === selectedOpId) as OpWithSchema | undefined;
+                    if (!selOp) return null;
+                    const selDesc = selOp.description || '';
+                    const fields = selOp.payload_schema?.fields || [];
+                    if (fields.length === 0) return <div style={{ fontSize: 12, color: "var(--color-text-tertiary)" }}>{selOp.description || ""}</div>;
+                    return (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {selDesc && <div style={{ fontSize: 12, color: "var(--color-text-secondary)", background: "var(--color-background-tertiary)", borderRadius: 6, padding: "6px 10px" }}>{selDesc}</div>}
+                        {fields.map(f => (
+                          <div key={f.key}>
+                            <label style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text-secondary)", display: "block", marginBottom: 3 }}>
+                              {f.label}{f.required && <span style={{ color: "#b91c1c", marginLeft: 2 }}>*</span>}
+                            </label>
+                            {f.type === "textarea" ? (
+                              <textarea value={formValues[f.key] || ""} onChange={e => setFormValues(prev => ({ ...prev, [f.key]: e.target.value }))} rows={3}
+                                style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: "1px solid var(--color-border-secondary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", fontSize: 13, resize: "vertical", boxSizing: "border-box" }} />
+                            ) : f.type === "select" && f.options ? (
+                              <select value={formValues[f.key] || ""} onChange={e => setFormValues(prev => ({ ...prev, [f.key]: e.target.value }))}
+                                style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: "1px solid var(--color-border-secondary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", fontSize: 13 }}>
+                                <option value="">選択してください</option>
+                                {f.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                              </select>
+                            ) : (
+                              <input type={f.type === "number" ? "number" : "text"} value={formValues[f.key] || ""} onChange={e => setFormValues(prev => ({ ...prev, [f.key]: e.target.value }))}
+                                style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: "1px solid var(--color-border-secondary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", fontSize: 13, boxSizing: "border-box" }} />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                  <button onClick={handleCreate} disabled={creating || !selectedOpId}
+                    style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: (creating || !selectedOpId) ? "#9ca3af" : "#7c3aed", color: "#fff", fontWeight: 700, cursor: (creating || !selectedOpId) ? "not-allowed" : "pointer", fontSize: 14, alignSelf: "flex-start" }}>
+                    {creating ? "追加中..." : "追加する"}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {loading ? (
+              <div style={{ textAlign: "center", padding: 32, color: "var(--color-text-secondary)", fontSize: 13 }}>読み込み中...</div>
+            ) : tasks.length === 0 ? (
+              <div style={{ textAlign: "center", padding: 40, color: "var(--color-text-secondary)" }}>
+                <div style={{ fontSize: 36, marginBottom: 10 }}>🤖</div>
+                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>まだ自動更新は設定されていません</div>
+                <div style={{ fontSize: 12, marginBottom: 14 }}>自動化したい更新内容を選んで追加してください</div>
+                <button onClick={() => {}}
+                  style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: "#7c3aed", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
+                  最初の自動化を追加
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {tasks.map(t => (
+                  <div key={t.task_id} onClick={() => setSelectedTask(t)}
+                    style={{ background: "var(--color-background-secondary)", border: "1px solid var(--color-border-tertiary)", borderRadius: 12, padding: "12px 16px", cursor: "pointer" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, background: STATUS_COLOR[t.status] + "22", color: STATUS_COLOR[t.status], borderRadius: 5, padding: "2px 7px" }}>{STATUS_LABEL[t.status] || t.status}</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-primary)" }}>{OP_LABEL[t.operation_type] || t.operation_type}</span>
+                      <span style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginLeft: "auto" }}>{t.created_at ? new Date(t.created_at).toLocaleString("ja-JP") : ""}</span>
+                    </div>
+                    {t.preview?.summary && <div style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>{t.preview.summary}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ③ 実行予約 */}
+        {tab === "schedule" && (
+          <div>
+            <div style={{ background: "var(--color-background-secondary)", border: "1px solid var(--color-border-tertiary)", borderRadius: 12, padding: 18, marginBottom: 14 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10, color: "var(--color-text-primary)" }}>＋ 自動実行を予約</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <select value={scheduleOpId} onChange={e => setScheduleOpId(e.target.value)}
+                  style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid var(--color-border-secondary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", fontSize: 14 }}>
+                  {ops.map(op => <option key={op.op_id} value={op.op_id}>{op.display_name || op.op_id}</option>)}
+                </select>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <select value={scheduleDow} onChange={e => setScheduleDow(e.target.value)}
+                    style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid var(--color-border-secondary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", fontSize: 14 }}>
+                    <option value="*">毎日</option>
+                    <option value="1">毎週 月曜</option>
+                    <option value="2">毎週 火曜</option>
+                    <option value="3">毎週 水曜</option>
+                    <option value="4">毎週 木曜</option>
+                    <option value="5">毎週 金曜</option>
+                    <option value="6">毎週 土曜</option>
+                    <option value="0">毎週 日曜</option>
+                  </select>
+                  <select value={scheduleHour} onChange={e => setScheduleHour(e.target.value)}
+                    style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid var(--color-border-secondary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", fontSize: 14 }}>
+                    {Array.from({length: 24}, (_, i) => <option key={i} value={String(i)}>{String(i).padStart(2,"0")}時</option>)}
+                  </select>
+                  <select value={scheduleMin} onChange={e => setScheduleMin(e.target.value)}
+                    style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid var(--color-border-secondary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", fontSize: 14 }}>
+                    {["0","15","30","45"].map(m => <option key={m} value={m}>{m.padStart(2,"0")}分</option>)}
+                  </select>
+                </div>
+                <div style={{ fontSize: 12, color: "var(--color-text-tertiary)", background: "var(--color-background-tertiary)", borderRadius: 6, padding: "6px 10px" }}>
+                  予約内容: {scheduleDow === "*" ? "毎日" : `毎週${["日","月","火","水","木","金","土"][parseInt(scheduleDow)]}曜`} {scheduleHour.padStart(2,"0")}:{scheduleMin.padStart(2,"0")} に自動実行
+                </div>
+                <button onClick={async () => {
+                  if (!scheduleOpId) { setMsg("自動化内容を選択してください"); return; }
+                  const cron = `${scheduleMin} ${scheduleHour} * * ${scheduleDow}`;
+                  try {
+                    await createAgentSchedule({ op_id: scheduleOpId, cron_expr: cron });
+                    setMsg("実行予約を登録しました");
+                    const d = await listAgentSchedules();
+                    setSchedules(d.schedules);
+                  } catch (e: unknown) { setMsg((e as Error).message); }
+                }} style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: "#7c3aed", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 14, alignSelf: "flex-start" }}>
+                  予約する
+                </button>
+              </div>
+            </div>
+
+            {schedules.length === 0 ? (
+              <div style={{ textAlign: "center", padding: 40, color: "var(--color-text-secondary)" }}>
+                <div style={{ fontSize: 36, marginBottom: 10 }}>📅</div>
+                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>まだ実行予約がありません</div>
+                <div style={{ fontSize: 12 }}>上のフォームから自動実行の予約を設定してください</div>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {schedules.map(s => (
+                  <div key={s.schedule_id} style={{ background: "var(--color-background-secondary)", border: "1px solid var(--color-border-tertiary)", borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14, color: "var(--color-text-primary)" }}>{ops.find(o => o.op_id === s.op_id)?.display_name || s.op_id}</div>
+                      <div style={{ fontSize: 12, color: "var(--color-text-tertiary)", marginTop: 2 }}>{cronToJa(s.cron_expr)}</div>
+                    </div>
+                    <button onClick={async () => {
+                      try {
+                        await updateAgentSchedule(s.schedule_id, !s.enabled);
+                        const d = await listAgentSchedules();
+                        setSchedules(d.schedules);
+                      } catch (e: unknown) { setMsg((e as Error).message); }
+                    }} style={{ padding: "4px 14px", borderRadius: 6, border: "1px solid var(--color-border-secondary)", background: s.enabled ? "#15803d22" : "none", color: s.enabled ? "#15803d" : "var(--color-text-secondary)", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+                      {s.enabled ? "稼働中" : "停止中"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ④ 実行履歴 */}
+        {tab === "logs" && (
+          <div>
+            {loading ? (
+              <div style={{ textAlign: "center", padding: 32, color: "var(--color-text-secondary)", fontSize: 13 }}>読み込み中...</div>
+            ) : logs.length === 0 ? (
+              <div style={{ textAlign: "center", padding: 40, color: "var(--color-text-secondary)" }}>
+                <div style={{ fontSize: 36, marginBottom: 10 }}>📋</div>
+                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>まだ実行履歴がありません</div>
+                <div style={{ fontSize: 12 }}>自動化を実行すると、ここに履歴が表示されます</div>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {logs.map(l => (
+                  <div key={l.log_id} style={{ background: "var(--color-background-secondary)", border: "1px solid var(--color-border-tertiary)", borderRadius: 12, padding: "12px 16px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, background: l.success ? "#15803d22" : "#b91c1c22", color: l.success ? "#15803d" : "#b91c1c", borderRadius: 5, padding: "2px 7px" }}>{l.success ? "✅ 成功" : "❌ 失敗"}</span>
+                      <span style={{ fontSize: 13, color: "var(--color-text-primary)" }}>{OP_LABEL[l.operation_type] || l.operation_type}</span>
+                      <span style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginLeft: "auto" }}>{l.executed_at ? new Date(l.executed_at).toLocaleString("ja-JP") : ""}</span>
+                    </div>
+                    {l.error_message && <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 4 }}>{translateError(l.error_message)}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ⑤ 異常通知 */}
+        {tab === "health" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {mappings.filter(m => !m.credential_secret_name).map(m => (
+              <div key={m.mapping_id} style={{ background: "#b91c1c11", border: "1px solid #b91c1c44", borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ fontSize: 20 }}>🔴</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "#b91c1c" }}>{m.media_name}</div>
+                  <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 2 }}>ログイン情報が未登録です</div>
+                </div>
+                <button onClick={() => { setTab("sites"); }}
+                  style={{ padding: "5px 12px", borderRadius: 6, border: "none", background: "#b91c1c", color: "#fff", fontWeight: 600, cursor: "pointer", fontSize: 12 }}>
+                  設定する
+                </button>
+              </div>
+            ))}
+            {longInactiveSites.filter(m => !!m.credential_secret_name).map(m => (
+              <div key={"inactive-" + m.mapping_id} style={{ background: "#b87d0011", border: "1px solid #b87d0044", borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ fontSize: 20 }}>🟡</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "#b87d00" }}>{m.media_name}</div>
+                  <div style={{ fontSize: 12, color: "#b87d00", marginTop: 2 }}>7日以上接続確認が行われていません</div>
+                </div>
+                <button onClick={async () => {
+                  try {
+                    setMsg("接続確認中...");
+                    const r = await loginCheckMediaMapping(m.mapping_id);
+                    setLoginCheckResults(prev => ({ ...prev, [m.mapping_id]: { login_success: r.login_success, message: r.message } }));
+                    setMsg(r.login_success ? "接続を確認しました" : "接続確認に失敗しました");
+                    fetchAll();
+                  } catch (e: unknown) { setMsg((e as Error).message); }
+                }} style={{ padding: "5px 12px", borderRadius: 6, border: "none", background: "#b87d00", color: "#fff", fontWeight: 600, cursor: "pointer", fontSize: 12 }}>
+                  再確認
+                </button>
+              </div>
+            ))}
+            {logs.filter(l => !l.success).slice(0, 5).map(l => (
+              <div key={l.log_id} style={{ background: "#b87d0011", border: "1px solid #b87d0044", borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ fontSize: 20 }}>⚠️</span>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "#b87d00" }}>{OP_LABEL[l.operation_type] || l.operation_type}</div>
+                  <div style={{ fontSize: 12, color: "#b87d00", marginTop: 2 }}>{translateError(l.error_message || "実行に失敗しました")}</div>
+                  <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginTop: 2 }}>{l.executed_at ? new Date(l.executed_at).toLocaleString("ja-JP") : ""}</div>
+                </div>
+              </div>
+            ))}
+            {mappings.filter(m => !m.credential_secret_name).length === 0 && longInactiveSites.filter(m => !!m.credential_secret_name).length === 0 && logs.filter(l => !l.success).length === 0 && (
+              <div style={{ textAlign: "center", padding: 48, color: "var(--color-text-secondary)" }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>🟢</div>
+                <div style={{ fontSize: 15, fontWeight: 600 }}>異常は検出されていません</div>
+                <div style={{ fontSize: 12, marginTop: 6 }}>すべての接続が正常に稼働しています</div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* タスク詳細モーダル */}
+        {selectedTask && (
+          <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: 16 }}>
+            <div style={{ background: "var(--color-background-primary)", borderRadius: 14, padding: 24, maxWidth: 500, width: "100%", maxHeight: "80vh", overflowY: "auto" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+                <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>実行内容の確認</h2>
+                <button onClick={() => setSelectedTask(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "var(--color-text-secondary)" }}>×</button>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 14 }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ background: STATUS_COLOR[selectedTask.status] + "22", color: STATUS_COLOR[selectedTask.status], borderRadius: 5, padding: "2px 10px", fontWeight: 700, fontSize: 12 }}>{STATUS_LABEL[selectedTask.status]}</span>
+                  <span style={{ color: "var(--color-text-secondary)", fontSize: 13 }}>{OP_LABEL[selectedTask.operation_type] || selectedTask.operation_type}</span>
+                </div>
+                <div style={{ background: "var(--color-background-tertiary)", borderRadius: 8, padding: "10px 14px" }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 13 }}>実行内容</div>
+                  <div style={{ color: "var(--color-text-secondary)", fontSize: 13 }}>{selectedTask.preview?.summary || "詳細情報なし"}</div>
+                </div>
+                {selectedTask.result && (() => {
+                  const res = selectedTask.result as Record<string, unknown>;
+                  const resMsg = res?.message ? String(res.message) : null;
+                  return resMsg ? (
+                    <div style={{ background: "var(--color-background-tertiary)", borderRadius: 8, padding: "10px 14px" }}>
+                      <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 13 }}>実行結果</div>
+                      <div style={{ fontSize: 13, color: "var(--color-text-secondary)", lineHeight: 1.6 }}>{translateError(resMsg)}</div>
+                    </div>
+                  ) : null;
+                })()}
+                <div style={{ display: "flex", gap: 10, marginTop: 6, flexWrap: "wrap" }}>
+                  {selectedTask.status === "APPROVED" && (
+                    <button onClick={() => { handleExecute(selectedTask.task_id); setSelectedTask(null); }}
+                      style={{ flex: 1, padding: "10px", borderRadius: 8, border: "none", background: "#15803d", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>実行する</button>
+                  )}
+                  {selectedTask.status === "WAITING_MAPPING" && (
+                    <div style={{ width: "100%", padding: "10px 14px", borderRadius: 8, background: "#c2410c11", border: "1px solid #c2410c44", fontSize: 13, color: "#c2410c" }}>
+                      ⚠️ 「① サイト接続」タブでサイトを設定してください
+                    </div>
+                  )}
+                  {selectedTask.status === "BLOCKED" && (
+                    <div style={{ width: "100%", padding: "10px 14px", borderRadius: 8, background: "#b91c1c11", border: "1px solid #b91c1c44", fontSize: 13, color: "#b91c1c" }}>
+                      🚫 必要情報が不足しています
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+
+        {/* ログインフォーム設定モーダル */}
+        {selectorModal && (
+          <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999999, padding: "16px" }}>
+            <div style={{ position: "relative", background: "var(--color-background-primary)", borderRadius: 14, padding: 24, maxWidth: 520, width: "100%", boxShadow: "0 8px 40px rgba(0,0,0,0.5)", maxHeight: "90vh", overflowY: "auto" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--color-text-primary)" }}>ログインフォーム設定</h2>
+                <button onClick={() => setSelectorModal(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 22, color: "var(--color-text-secondary)", lineHeight: 1 }}>×</button>
+              </div>
+              <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 14, lineHeight: 1.6 }}>
+                「{selectorModal.media_name}」のログイン画面にある入力欄・ボタンのCSSセレクターを設定してください。
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {([
+                  { label: "IDフィールド（必須）", placeholder: 'input[name="email"]', val: selectorUsername, set: setSelectorUsername },
+                  { label: "パスワードフィールド（必須）", placeholder: 'input[name="password"]', val: selectorPassword, set: setSelectorPassword },
+                  { label: "ログインボタン（必須）", placeholder: 'button[type="submit"]', val: selectorSubmit, set: setSelectorSubmit },
+                  { label: "ログイン確認要素（任意）", placeholder: ".user-menu", val: selectorVerify, set: setSelectorVerify },
+                ] as Array<{label:string;placeholder:string;val:string;set:(v:string)=>void}>).map(f => (
+                  <div key={f.label} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-secondary)" }}>{f.label}</label>
+                    <input value={f.val} onChange={e => f.set(e.target.value)} placeholder={f.placeholder}
+                      style={{ display: "block", width: "100%", padding: "8px 12px", borderRadius: 8, border: "1px solid var(--color-border-secondary)", background: "var(--color-background-secondary)", color: "var(--color-text-primary)", fontSize: 13, fontFamily: "monospace", boxSizing: "border-box" }} />
+                  </div>
+                ))}
+                <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                  <button onClick={() => setSelectorModal(null)}
+                    style={{ flex: 1, padding: "9px", borderRadius: 8, border: "1px solid var(--color-border-secondary)", background: "none", color: "var(--color-text-secondary)", cursor: "pointer", fontSize: 14 }}>
+                    キャンセル
+                  </button>
+                  <button onClick={async () => {
+                    if (!selectorModal) return;
+                    if (!selectorUsername || !selectorPassword || !selectorSubmit) {
+                      setMsg("ID・パスワード・ログインボタンのセレクターを入力してください");
+                      return;
+                    }
+                    try {
+                      setMsg("保存中...");
+                      await updateMediaSelectors(
+                        selectorModal.mapping_id,
+                        { username: selectorUsername, password: selectorPassword, login_submit: selectorSubmit },
+                        selectorVerify || undefined
+                      );
+                      setMsg("ログインフォーム設定を保存しました");
+                      setSelectorModal(null);
+                      fetchAll();
+                    } catch (e: unknown) {
+                      setMsg((e as Error).message);
+                    }
+                  }}
+                    style={{ flex: 1, padding: "9px", borderRadius: 8, border: "none", background: "#7c3aed", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
+                    保存する
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ログイン情報登録モーダル */}
+        {loginRegModal && (
+          <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: 16 }}>
+            <div style={{ background: "var(--color-background-primary)", borderRadius: 14, padding: 24, maxWidth: 400, width: "100%" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+                <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>ログイン情報を登録</h2>
+                <button onClick={() => setLoginRegModal(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "var(--color-text-secondary)" }}>×</button>
+              </div>
+              <div style={{ fontSize: 13, color: "var(--color-text-secondary)", marginBottom: 12 }}>「{loginRegModal.media_name}」へ自動ログインするためのID・パスワードを登録してください。</div>
+              <div style={{ fontSize: 12, color: "var(--color-text-secondary)", background: "var(--color-background-tertiary)", borderRadius: 8, padding: "8px 12px", marginBottom: 12 }}>
+                🔒 入力した情報は暗号化して安全に保存されます。
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <input value={loginRegId} onChange={e => setLoginRegId(e.target.value)} placeholder="ログインID（メールアドレス等）"
+                  style={{ padding: "9px 12px", borderRadius: 8, border: "1px solid var(--color-border-secondary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", fontSize: 14 }} />
+                <input type="password" value={loginRegPass} onChange={e => setLoginRegPass(e.target.value)} placeholder="パスワード"
+                  style={{ padding: "9px 12px", borderRadius: 8, border: "1px solid var(--color-border-secondary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", fontSize: 14 }} />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => setLoginRegModal(null)}
+                    style={{ flex: 1, padding: "9px", borderRadius: 8, border: "1px solid var(--color-border-secondary)", background: "none", color: "var(--color-text-secondary)", cursor: "pointer", fontSize: 14 }}>キャンセル</button>
+                  <button onClick={async () => {
+                    if (!loginRegId || !loginRegPass) { setMsg("IDとパスワードを入力してください"); return; }
+                    if (!loginRegModal) return;
+                    setLoginRegLoading(true);
+                    try {
+                      await saveMediaCredential(loginRegModal.mapping_id, loginRegId, loginRegPass);
+                      setLoginRegId(""); setLoginRegPass("");
+                      setLoginRegModal(null);
+                      // 登録後に自動でログイン確認
+                      try {
+                        const r = await loginCheckMediaMapping(loginRegModal.mapping_id);
+                        setLoginCheckResults(prev => ({ ...prev, [loginRegModal.mapping_id]: { login_success: r.login_success, message: r.message } }));
+                        setMsg(r.login_success ? "ログイン情報を登録し、接続確認に成功しました" : "ログイン情報を保存しましたが、接続確認に失敗しました");
+                      } catch {
+                        setMsg("ログイン情報を保存しましたが、接続確認に失敗しました");
+                      }
+                      fetchAll();
+                    } catch (e: unknown) {
+                      setMsg((e as Error).message);
+                    } finally {
+                      setLoginRegLoading(false);
+                    }
+                  }} disabled={loginRegLoading}
+                    style={{ flex: 1, padding: "9px", borderRadius: 8, border: "none", background: loginRegLoading ? "#9ca3af" : "#7c3aed", color: "#fff", fontWeight: 700, cursor: loginRegLoading ? "not-allowed" : "pointer", fontSize: 14 }}>
+                    {loginRegLoading ? "登録中..." : "登録する"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
