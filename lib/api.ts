@@ -3,7 +3,12 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC
 
 function getToken(): string {
   if (typeof window === "undefined") return "";
-  return localStorage.getItem("ascend_token") || "";
+  // localStorage を優先（互換性のため）、なければ undefined を返す
+  // Cookieは自動的に fetch に含まれる（credentials: 'include' で）
+  const token = localStorage.getItem("ascend_token");
+  if (token) return token;
+  // Cookieからの取得は fetch 時に自動で行われるため、ここでは空文字列を返す
+  return "";
 }
 
 function authHeaders(): HeadersInit {
@@ -11,6 +16,17 @@ function authHeaders(): HeadersInit {
   return token
     ? { "Content-Type": "application/json", Authorization: `Bearer ${token}` }
     : { "Content-Type": "application/json" };
+}
+
+function fetchOptions(method: string = "GET", body?: string): RequestInit {
+  const headers = authHeaders();
+  const init: RequestInit = {
+    method,
+    headers,
+    credentials: "include", // Cookie を自動送信・受信
+  };
+  if (body) init.body = body;
+  return init;
 }
 
 export interface LoginResult {
@@ -25,6 +41,7 @@ export async function loginUser(uid: string, password: string): Promise<LoginRes
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ uid, password, role: "user" }),
+    credentials: "include", // Cookie 自動送信・受信
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -33,14 +50,27 @@ export async function loginUser(uid: string, password: string): Promise<LoginRes
     throw new Error(detail);
   }
   const data: LoginResult = await res.json();
+  // localStorage にも保存（互換性のため）
   localStorage.setItem("ascend_token", data.token);
   localStorage.setItem("ascend_uid", data.uid);
   localStorage.setItem("ascend_role", data.role);
   localStorage.setItem("ascend_tenant", data.tenant_id);
+  // Cookieは自動的に set_cookie で保存される
   return data;
 }
 
-export function logout(): void {
+export async function logout(): Promise<void> {
+  try {
+    // APIのlogoutエンドポイントを呼び出し、Cookieを削除
+    await fetch(`${API_BASE}/api/auth/logout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+    });
+  } catch {
+    // エラーでも続行
+  }
+  // localStorage からも削除
   localStorage.removeItem("ascend_token");
   localStorage.removeItem("ascend_uid");
   localStorage.removeItem("ascend_role");
@@ -53,6 +83,7 @@ export async function recordAdClick(adId: string, tenantId: string): Promise<voi
       method: "POST",
       headers: authHeaders() as Record<string, string>,
       body: JSON.stringify({ ad_id: adId, tenant_id: tenantId }),
+      credentials: "include",
     });
   } catch {
     // クリック記録失敗は無視
@@ -71,6 +102,7 @@ export async function fetchAd(position: "sidebar" | "mypage"): Promise<{
 }> {
   const res = await fetch(`${API_BASE}/api/ads?position=${position}`, {
     headers: authHeaders() as Record<string, string>,
+    credentials: "include",
   });
   if (!res.ok) return { ad: null };
   return res.json();
@@ -131,6 +163,7 @@ export async function sendMessage(
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify({ message, chat_id, ai_tier, purpose_mode, chat_mode }),
+    credentials: "include",
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -142,6 +175,7 @@ export async function sendMessage(
 export async function loadHistory(chat_id: string = "main"): Promise<Message[]> {
   const res = await fetch(`${API_BASE}/api/chat/history/${chat_id}`, {
     headers: authHeaders(),
+    credentials: "include",
   });
   if (!res.ok) return [];
   const data = await res.json();
@@ -299,6 +333,7 @@ export async function registerUser(uid: string, password: string, display_name: 
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ uid, password, display_name }),
+    credentials: "include",
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -838,6 +873,12 @@ export interface AgentTask {
   scheduled_at: string | null;
   result: Record<string, unknown> | null;
   created_at: string;
+  media_mapping_id?: string;
+  menu_item_target_url?: string;
+  menu_item_title?: string;
+  menu_item_category?: string;
+  source?: string;
+  schedule_id?: string;
   // P14
   operation_steps?: {
     step_id: string;
@@ -877,6 +918,7 @@ export async function createAgentTask(params: {
   entity_type?: string;
   op_id?: string;
   payload: Record<string, unknown>;
+  operation_mapping_override?: Record<string, unknown>;
   scheduled_at?: string;
   media_mapping_id?: string;
 }): Promise<{ task_id: string; status: string; preview: AgentTask["preview"] }> {
@@ -887,6 +929,258 @@ export async function createAgentTask(params: {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || "タスク作成に失敗しました");
+  return data;
+}
+
+// 求人対応（項目7）: 専用ナレッジ＋市場調査でAI文面を生成（送信はしない）
+export async function recruitGenerate(params: {
+  target_mapping_id?: string;
+  recruit_mode: "offer" | "reply" | "text";
+  applicant_context?: string;
+  conditions?: string;
+  instruction?: string;
+  industry?: string;
+}): Promise<{
+  recruit_mode: string;
+  doc_label: string;
+  title: string;
+  body: string;
+  knowledge_used: boolean;
+  market_used: boolean;
+  note: string;
+}> {
+  const res = await fetch(`${API_BASE}/api/agent/cross_media/recruit/generate`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+    body: JSON.stringify(params),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "求人文面の生成に失敗しました");
+  return data;
+}
+
+export interface AgentTaskBatch {
+  batch_id: string;
+  tenant_id?: string;
+  user_uid?: string;
+  agent_type: string;
+  operation_type: string;
+  industry?: string;
+  payload?: Record<string, unknown>;
+  workflow_id?: string;
+  status: string;
+  task_ids: string[];
+  created_tasks?: { task_id: string; mapping_id: string; media_name: string; status: string; step_count?: number }[];
+  skipped_targets?: { mapping_id: string; media_name?: string; reason: string; operation_status?: string; missing?: string[] }[];
+  counts?: Record<string, number>;
+  execution_results?: { task_id: string; status: string; skipped?: boolean; reason?: string; error?: string; result?: Record<string, unknown> }[];
+  created_at?: string;
+  approved_at?: string;
+  executed_at?: string;
+  updated_at?: string;
+}
+
+export interface CrossMediaTask {
+  cross_task_id: string;
+  tenant_id?: string;
+  user_uid?: string;
+  workflow_id?: string;
+  instruction?: string;
+  industry?: string;
+  source_mode: "manual_payload" | "public_url" | "source_mapping";
+  source_url?: string;
+  source_mapping_id?: string;
+  source_status?: string;
+  source_snapshot?: Record<string, unknown>;
+  target_operation_type: string;
+  target_mapping_ids?: string[];
+  payload?: Record<string, unknown>;
+  query?: string;
+  max_items?: number;
+  status: string;
+  task_ids: string[];
+  created_tasks?: { task_id: string; mapping_id: string; media_name: string; status: string; step_count?: number }[];
+  skipped_targets?: { mapping_id: string; media_name?: string; reason: string; operation_status?: string; missing?: string[] }[];
+  counts?: Record<string, number>;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export async function fetchCrossMediaSourceEntities(params: {
+  source_mapping_id: string;
+  target_operation_type?: string;
+  list_url?: string;
+}): Promise<{
+  ok: boolean;
+  status: string;
+  message?: string;
+  entity_label: string;
+  list_url: string;
+  entities: { name: string; url: string }[];
+  count: number;
+}> {
+  const res = await fetch(`${API_BASE}/api/agent/cross_media/source_entities`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+    body: JSON.stringify(params),
+  });
+  const data = await res.json().catch(() => ({ ok: false, entities: [] }));
+  if (!res.ok) throw new Error(data.detail || "対象一覧の取得に失敗しました");
+  return data;
+}
+
+export async function fetchCrossMediaSnapshot(params: {
+  source_mapping_id: string;
+  dest_mapping_id: string;
+  entity_url: string;
+}): Promise<{
+  ok: boolean;
+  message?: string;
+  snapshot: {
+    synced_at: string | null;
+    source_data: Record<string, string>;
+    mapped_fields: Record<string, string>;
+    entity_label: string;
+    industry: string;
+  } | null;
+}> {
+  const q = new URLSearchParams(params).toString();
+  const res = await fetch(`${API_BASE}/api/agent/cross_media/snapshot?${q}`, {
+    headers: authHeaders() as Record<string, string>,
+  });
+  const data = await res.json().catch(() => ({ ok: false, snapshot: null }));
+  if (!res.ok) throw new Error(data.detail || "スナップショット取得に失敗しました");
+  return data;
+}
+
+export async function createCrossMediaTask(params: {
+  instruction?: string;
+  industry?: string;
+  source_mode: "manual_payload" | "public_url" | "source_mapping";
+  source_url?: string;
+  source_mapping_id?: string;
+  target_mapping_ids?: string[];
+  target_operation_type: string;
+  source_payload?: Record<string, unknown>;
+  query?: string;
+  max_items?: number;
+  source_access_confirmed?: boolean;
+  scheduled_at?: string;
+  source_entity_url?: string;
+  source_entity_label?: string;
+  selected_field_keys?: string[];
+}): Promise<CrossMediaTask> {
+  const res = await fetch(`${API_BASE}/api/agent/cross_media/task/create`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+    body: JSON.stringify(params),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "媒体クロスメディア作成に失敗しました");
+  return data;
+}
+
+export async function previewCrossMedia(params: {
+  source_mapping_id?: string;
+  source_url?: string;
+  source_payload?: Record<string, unknown>;
+  target_mapping_ids: string[];
+  target_operation_type: string;
+  instruction?: string;
+  source_entity_url?: string;
+}): Promise<{
+  results: {
+    mapping_id: string;
+    media_name: string;
+    screenshot_b64?: string;
+    current_url?: string;
+    resolved_url?: string;
+    url_source?: string;
+    url_verified?: boolean;
+    mapping_detail: { index: number; label: string; name: string; value: string }[];
+    field_count: number;
+    mapped_field_count?: number;
+    known_mapped_fields?: Array<{selector?: string; label?: string; name?: string; id?: string; type?: string; required?: boolean; canonical?: string; source?: string}>;
+    mapped_count: number;
+    source_data_keys: string[];
+    error?: string;
+  }[];
+  source_data: Record<string, string>;
+}> {
+  const res = await fetch(`${API_BASE}/api/agent/cross_media/preview`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+    body: JSON.stringify(params),
+  });
+  const data = await res.json().catch(() => ({ results: [], source_data: {} }));
+  if (!res.ok) throw new Error(data.detail || "プレビュー取得に失敗しました");
+  return data;
+}
+
+export async function deleteCrossMediaTask(crossTaskId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/agent/cross_media/task/${encodeURIComponent(crossTaskId)}`, {
+    method: "DELETE",
+    headers: authHeaders() as Record<string, string>,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "削除に失敗しました");
+}
+
+export async function listCrossMediaTasks(): Promise<{ tasks: CrossMediaTask[]; count: number }> {
+  const res = await fetch(`${API_BASE}/api/agent/cross_media/task/list`, {
+    headers: authHeaders() as Record<string, string>,
+  });
+  const data = await res.json().catch(() => ({ tasks: [], count: 0 }));
+  return data;
+}
+
+export async function createAgentTaskBatch(params: {
+  agent_type?: string;
+  operation_type: string;
+  industry?: string;
+  entity_type?: string;
+  media_mapping_ids?: string[];
+  payload: Record<string, unknown>;
+  scheduled_at?: string;
+  include_needs_review?: boolean;
+}): Promise<AgentTaskBatch> {
+  const res = await fetch(`${API_BASE}/api/agent/task/batch/create`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+    body: JSON.stringify(params),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "一括タスク作成に失敗しました");
+  return data;
+}
+
+export async function approveAgentTaskBatch(batch_id: string): Promise<{ batch_id: string; status: string; approved_task_ids: string[]; skipped: unknown[]; counts: Record<string, number> }> {
+  const res = await fetch(`${API_BASE}/api/agent/task/batch/approve`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+    body: JSON.stringify({ batch_id }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "一括承認に失敗しました");
+  return data;
+}
+
+export async function executeAgentTaskBatch(batch_id: string): Promise<{ batch_id: string; status: string; results: unknown[]; counts: Record<string, number> }> {
+  const res = await fetch(`${API_BASE}/api/agent/task/batch/execute`, {
+    method: "POST",
+    headers: authHeaders() as Record<string, string>,
+    body: JSON.stringify({ batch_id }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "一括実行に失敗しました");
+  return data;
+}
+
+export async function listAgentTaskBatches(): Promise<{ batches: AgentTaskBatch[]; count: number }> {
+  const res = await fetch(`${API_BASE}/api/agent/task/batch/list`, {
+    headers: authHeaders() as Record<string, string>,
+  });
+  const data = await res.json().catch(() => ({ batches: [], count: 0 }));
   return data;
 }
 
@@ -912,6 +1206,85 @@ export async function planAgentTask(params: {
   return res.json();
 }
 
+export type AgentGoalPlan = {
+  ok: boolean;
+  goal: string;
+  mode: string;
+  route_tab: string;
+  confidence: number;
+  summary: string;
+  autonomy_level?: string;
+  can_create_task: boolean;
+  operation_plan?: {
+    ready?: boolean;
+    operation_type?: string;
+    payload?: Record<string, unknown>;
+    preview?: string;
+    question?: string | null;
+  };
+  extracted?: Record<string, unknown>;
+  prefill?: {
+    monitoring?: Record<string, unknown>;
+    cross_media?: Record<string, unknown>;
+    interview?: Record<string, unknown>;
+    task?: Record<string, unknown>;
+    schedule?: Record<string, unknown>;
+  };
+  missing_capabilities?: string[];
+  tool_selection?: Array<{ tool: string; tab: string; score: number; reason: string }>;
+  readiness: Record<string, number>;
+  media: Array<Record<string, unknown>>;
+  workstream: Array<{ phase: string; title: string; tab: string; status: string }>;
+  next_actions: Array<{ label: string; tab: string; status: string; reason: string }>;
+};
+
+export async function planAgentGoal(params: {
+  goal: string;
+  mapping_id?: string;
+}): Promise<AgentGoalPlan> {
+  const res = await fetch(`${API_BASE}/api/agent/goal/plan`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "ゴール解析に失敗しました");
+  return data;
+}
+
+export async function createAgentTaskFromInstruction(params: {
+  instruction: string;
+  mapping_id?: string;
+  payload?: Record<string, unknown>;
+  scheduled_at?: string;
+}): Promise<{
+  ok: boolean;
+  created: boolean;
+  status?: string;
+  source?: "menu_item" | "media_mapping";
+  task_id?: string;
+  preview?: AgentTask["preview"];
+  operation_type?: string;
+  media_name?: string;
+  mapping_id?: string;
+  target_url?: string;
+  question?: string;
+  candidates?: Array<Record<string, unknown>>;
+  plan?: Record<string, unknown>;
+}> {
+  const res = await fetch(`${API_BASE}/api/agent/task/from_instruction`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = typeof data.detail === "string" ? data.detail : data.detail?.message;
+    throw new Error(detail || "自然文タスク作成に失敗しました");
+  }
+  return data;
+}
+
 export async function approveAgentTask(task_id: string): Promise<{ task_id: string; status: string }> {
   const res = await fetch(`${API_BASE}/api/agent/task/approve`, {
     method: "POST",
@@ -931,6 +1304,16 @@ export async function rejectAgentTask(task_id: string, reason?: string): Promise
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || "却下に失敗しました");
+  return data;
+}
+
+export async function deleteAgentTask(task_id: string): Promise<{ task_id: string; status: string }> {
+  const res = await fetch(`${API_BASE}/api/agent/task/${encodeURIComponent(task_id)}`, {
+    method: "DELETE",
+    headers: authHeaders() as Record<string, string>,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "削除に失敗しました");
   return data;
 }
 
@@ -987,6 +1370,48 @@ export async function getAgentIndustryTemplates(): Promise<{
   return data;
 }
 
+export async function getAgentPermissions(tenantId: string): Promise<{
+  tenant_id?: string;
+  admin_granted?: boolean;
+  allowed_agents?: string[];
+  allowed_operations?: string[];
+  max_tasks_per_day?: number;
+  operations?: Record<string, { approval_count?: number; auto_enabled?: boolean; last_approved_at?: string }>;
+}> {
+  const res = await fetch(`${API_BASE}/api/agent/permissions/${encodeURIComponent(tenantId)}`, {
+    headers: authHeaders() as Record<string, string>,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "エージェント権限取得に失敗しました");
+  return data;
+}
+
+export async function updateAgentPermissions(
+  tenantId: string,
+  patch: {
+    admin_granted?: boolean;
+    allowed_agents?: string[];
+    allowed_operations?: string[];
+    max_tasks_per_day?: number;
+  }
+): Promise<{
+  tenant_id?: string;
+  admin_granted?: boolean;
+  allowed_agents?: string[];
+  allowed_operations?: string[];
+  max_tasks_per_day?: number;
+  operations?: Record<string, { approval_count?: number; auto_enabled?: boolean; last_approved_at?: string }>;
+}> {
+  const res = await fetch(`${API_BASE}/api/agent/permissions/${encodeURIComponent(tenantId)}`, {
+    method: "PATCH",
+    headers: { ...(authHeaders() as Record<string, string>), "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "エージェント権限更新に失敗しました");
+  return data;
+}
+
 
 // ── Agent Mode 追加関数 ──────────────────────────────────────────────────────
 
@@ -1027,6 +1452,17 @@ export interface MediaMapping {
   dom_selectors: Record<string, string>;
   form_structure: Record<string, unknown>;
   last_verified_at: string | null;
+  manual_menu_scan_results?: {
+    items?: unknown[];
+    summary?: Record<string, unknown>;
+    started_at?: string;
+    updated_at?: string;
+    finished_at?: string;
+  } | null;
+  scan_progress?: Record<string, unknown> | null;
+  schema_first?: Record<string, unknown> | null;
+  media_schema?: Record<string, unknown> | null;
+  entity_schema?: Record<string, unknown> | null;
   login_health?: string | null;
   created_at: string;
   capabilities?: { can_login?: boolean; can_upload_image?: boolean; can_post_news?: boolean; can_update_text?: boolean; can_verify?: boolean; } | null;
@@ -1083,12 +1519,106 @@ export interface MediaMapping {
     last_success_at?: string | null;
     recommendations?: string[];
   } | null;
+  business_conditions?: {
+    site_purpose?: string;
+    screening?: {
+      height_min?: number;
+      height_max?: number;
+      weight_max?: number;
+      cup_min?: string;
+      tattoo_ok?: boolean;
+      age_min?: number;
+      age_max?: number;
+      custom_conditions?: string;
+      image_check?: boolean;
+    };
+    reply_policy?: {
+      tone?: string;
+      interview_info?: string;
+      shop_conditions?: string;
+    };
+    offer_template?: string;
+  } | null;
+  manual_form_pages?: Array<{
+    page_id?: string;
+    title?: string;
+    url?: string;
+    op_type?: string;
+    page_type?: string;
+    fields?: Array<{
+      selector?: string;
+      label?: string;
+      name?: string;
+      id?: string;
+      type?: string;
+      required?: boolean;
+      canonical?: string;
+      options?: string[];
+      placeholder?: string;
+      value?: string;
+    }>;
+    fields_count?: number;
+    form_action?: string;
+    save_selector?: string;
+    source?: string;
+    saved_at?: string;
+    op_type_user_specified?: boolean;
+  }> | null;
+  operation_mappings?: Record<string, {
+    status?: string;
+    executable?: boolean;
+    confirmed?: boolean;
+    user_confirmed?: boolean;
+    production_ready?: boolean;
+    candidate_only?: boolean;
+    confirmation_status?: string;
+    execution_block_reason?: string;
+    target_url?: string;
+    source?: string;
+    fields?: Array<{selector?: string; label?: string; name?: string; id?: string; type?: string; required?: boolean; canonical?: string; options?: string[]; placeholder?: string; value?: string}>;
+    selectors?: Record<string, {selector: string; label?: string; type?: string; source?: string; confidence?: string}>;
+    form_schema?: {fields?: Array<{selector?: string; label?: string; name?: string; id?: string; canonical?: string; type?: string; required?: boolean; options?: string[]; placeholder?: string; value?: string}>};
+    form_action?: string;
+    save_selector?: string;
+    manual_title?: string;
+    missing?: string[];
+    validation_score?: number;
+    updated_at?: string;
+  }> | null;
+}
+
+export interface MediaSchemaResponse {
+  mapping_id: string;
+  media_name: string;
+  schema_first: Record<string, unknown>;
+  media_schema: Record<string, unknown>;
+  entity_schema: Record<string, unknown>;
+  schema_generation?: string;
+  forms: Array<Record<string, unknown>>;
+  fields: Array<Record<string, unknown>>;
+  counts: Record<string, number>;
+}
+
+export interface MediaMenuItemsResponse {
+  mapping_id: string;
+  media_name: string;
+  items: Array<Record<string, unknown>>;
+  count: number;
+  summary: Record<string, unknown>;
+  storage_mode?: string;
+  items_subcollection?: string;
 }
 
 export interface AgentSchedule {
   schedule_id: string;
   tenant_id: string;
   op_id: string;
+  operation_type?: string;
+  media_mapping_id?: string;
+  media_name?: string;
+  menu_item_target_url?: string;
+  menu_item_title?: string;
+  menu_item_category?: string;
   cron_expr: string;
   payload_template: Record<string, unknown>;
   enabled: boolean;
@@ -1141,7 +1671,10 @@ export async function deleteMediaMapping(mapping_id: string): Promise<{ mapping_
 }
 
 export async function createAgentSchedule(params: {
-  op_id: string;
+  op_id?: string;
+  operation_type?: string;
+  media_mapping_id?: string;
+  menu_item_target_url?: string;
   cron_expr: string;
   payload_template?: Record<string, unknown>;
   enabled?: boolean;
@@ -1215,6 +1748,103 @@ export async function loginCheckMediaMapping(mapping_id: string): Promise<{
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || data.message || data.error || "ログイン確認失敗");
+  return data;
+}
+
+export interface SitePreviewFieldBox {
+  key: string;
+  selector: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface SitePreviewResult {
+  mapping_id?: string;
+  screenshot_b64: string;
+  page_html: string;
+  current_url: string;
+  title: string;
+  field_boxes: SitePreviewFieldBox[];
+  form_elements?: FormElement[];
+  login_used: boolean;
+  viewport: { width: number; height: number };
+}
+
+export interface FormElement {
+  idx: number;
+  tag: string;
+  type: string;
+  label: string;
+  name: string;
+  selector: string | null;
+  current_value: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface FormFillResult {
+  mapping_id: string;
+  submit_clicked: boolean;
+  screenshot_b64: string;
+  current_url: string;
+  field_errors: string[];
+  viewport: { width: number; height: number };
+  message: string;
+}
+
+export async function formFill(
+  mapping_id: string,
+  target_url: string,
+  field_values: Record<string, string>
+): Promise<FormFillResult> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mapping_id}/form_fill`, {
+    method: "POST",
+    headers: { ...(authHeaders() as Record<string, string>), "Content-Type": "application/json" },
+    body: JSON.stringify({ target_url, field_values }),
+    credentials: "include",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || data.message || "フォーム送信に失敗しました");
+  return data;
+}
+
+export async function getSitePreview(mapping_id: string, target_url?: string): Promise<SitePreviewResult> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mapping_id}/site_preview`, {
+    method: "POST",
+    headers: { ...(authHeaders() as Record<string, string>), "Content-Type": "application/json" },
+    body: JSON.stringify({ target_url: target_url || "" }),
+    credentials: "include",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || data.message || "サイトプレビューの取得に失敗しました");
+  return data;
+}
+
+export async function previewPublicUrl(url: string): Promise<SitePreviewResult> {
+  const res = await fetch(`${API_BASE}/api/agent/media/preview_url`, {
+    method: "POST",
+    headers: { ...(authHeaders() as Record<string, string>), "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+    credentials: "include",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || data.message || "URLプレビューの取得に失敗しました");
+  return data;
+}
+
+export async function getFormSnapshot(mapping_id: string, target_url?: string): Promise<SitePreviewResult> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mapping_id}/form_snapshot`, {
+    method: "POST",
+    headers: { ...(authHeaders() as Record<string, string>), "Content-Type": "application/json" },
+    body: JSON.stringify({ target_url: target_url || "" }),
+    credentials: "include",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || data.message || "フォームスナップショットの取得に失敗しました");
   return data;
 }
 
@@ -1457,6 +2087,121 @@ export async function scanMediaDom(
   return data;
 }
 
+export async function getMediaMappingSchema(
+  mapping_id: string,
+  options?: { include_forms?: boolean; include_fields?: boolean; forms_limit?: number; fields_limit?: number }
+): Promise<MediaSchemaResponse> {
+  const params = new URLSearchParams();
+  if (options?.include_forms !== undefined) params.set("include_forms", String(options.include_forms));
+  if (options?.include_fields !== undefined) params.set("include_fields", String(options.include_fields));
+  if (options?.forms_limit !== undefined) params.set("forms_limit", String(options.forms_limit));
+  if (options?.fields_limit !== undefined) params.set("fields_limit", String(options.fields_limit));
+  const qs = params.toString();
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${encodeURIComponent(mapping_id)}/schema${qs ? `?${qs}` : ""}`, {
+    headers: authHeaders() as Record<string, string>,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "媒体schema取得に失敗しました");
+  return data as MediaSchemaResponse;
+}
+
+export async function getMediaMenuScanItems(mapping_id: string, limit = 300): Promise<MediaMenuItemsResponse> {
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${encodeURIComponent(mapping_id)}/menu_items?${params.toString()}`, {
+    headers: authHeaders() as Record<string, string>,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "HTMLメニュー詳細の取得に失敗しました");
+  return data as MediaMenuItemsResponse;
+}
+
+export type ProfileDisplayField = { selector: string; label: string; value: string; type: string };
+export type ProfileMappingResult = {
+  mapping_id: string;
+  media_name?: string;
+  target_url?: string;
+  fill_fields?: Record<string, string>;   // CSSセレクタ→値（execute直通）
+  display_fields?: ProfileDisplayField[]; // UI表示用
+  error?: string;
+};
+
+export async function generateProfilePreview(params: {
+  cast_name: string;
+  age?: string;
+  height?: string;
+  bust?: string;
+  cup?: string;
+  waist?: string;
+  hip?: string;
+  type_hint?: string;
+  custom_instructions?: string;
+  industry?: string;
+  target_mapping_ids: string[];
+  source_html?: string;
+  source_html_mapping_id?: string;
+  source_html_target_url?: string;
+}): Promise<{ ok: boolean; cast_name: string; generated_fields: Record<string, string>; mapping_results: ProfileMappingResult[] }> {
+  const res = await fetch(`${API_BASE}/api/agent/cross_media/generate_profile_preview`, {
+    method: "POST",
+    headers: { ...(authHeaders() as Record<string, string>), "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || data.message || "プロフィール生成に失敗しました");
+  return data;
+}
+
+export async function generateProfileExecute(params: {
+  cast_name: string;
+  fill_fields: Record<string, string>;   // CSSセレクタ→値
+  target_mapping_id: string;
+  target_url?: string;
+}): Promise<{ ok: boolean; cast_name: string; message: string; filled_count?: number }> {
+  const res = await fetch(`${API_BASE}/api/agent/cross_media/generate_profile_execute`, {
+    method: "POST",
+    headers: { ...(authHeaders() as Record<string, string>), "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || data.message || "プロフィール登録に失敗しました");
+  return data;
+}
+
+export type MonitoringResult = {
+  id: string;
+  tenant_id: string;
+  mapping_id: string;
+  task_id?: string;
+  executed_at?: string;
+  monitoring_target?: string;
+  industry?: string;
+  trending_phrases: string[];
+  popular_types: string[];
+  avoid_phrases: string[];
+  ai_summary: string;
+  recommendations: string[];
+  keyword_hits?: Record<string, number>;
+  active_casts?: { cast_name: string; count: number }[];
+  silent_casts?: string[];
+  total_posts?: number;
+  competitors?: { url: string; ok: boolean; title?: string; total_posts?: number }[];
+};
+
+export async function getMonitoringResults(params: {
+  mapping_id?: string;
+  limit?: number;
+}): Promise<{ results: MonitoringResult[] }> {
+  const qs = new URLSearchParams();
+  if (params.mapping_id) qs.set("mapping_id", params.mapping_id);
+  if (params.limit) qs.set("limit", String(params.limit));
+  const res = await fetch(`${API_BASE}/api/agent/monitoring/results?${qs}`, {
+    headers: authHeaders() as Record<string, string>,
+  });
+  const data = await res.json().catch(() => ({ results: [] }));
+  return data;
+}
+
 export async function deepScanOperation(
   mapping_id: string,
   operation_type: string,
@@ -1487,6 +2232,104 @@ export async function deepScanOperation(
   return data;
 }
 
+
+export interface DialogCandidate {
+  value?: string;       // URL type
+  selector?: string;    // selector type
+  description: string;
+  confidence: "high" | "medium" | "low";
+  tag?: string;         // selector type: HTML タグ名
+  text?: string;        // selector type: 表示テキスト
+  placeholder?: string; // selector type: placeholder 属性
+}
+export interface DialogStep {
+  role: string;
+  question: string;
+  type: "url" | "selector";
+  optional: boolean;
+  candidates: DialogCandidate[];
+}
+
+export async function scanOperationDialog(
+  mapping_id: string,
+  page_url: string,
+  page_name: string,
+  intent?: string
+): Promise<{ ok: boolean; page_name: string; page_url: string; steps: DialogStep[]; discovered_tabs?: {href: string; absolute_url: string; text: string}[]; error?: string }> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mapping_id}/dialog/scan`, {
+    method: "POST",
+    headers: { ...(authHeaders() as Record<string, string>), "Content-Type": "application/json" },
+    body: JSON.stringify({ page_url, page_name, ...(intent ? { intent } : {}) }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("ASCENDに再ログインしてください");
+    throw new Error(data.detail || data.message || data.error || "スキャン失敗");
+  }
+  return data;
+}
+
+export async function autoDiscoverMenu(mappingId: string, startUrl?: string): Promise<{ ok: boolean; items_count: number; source_url: string }> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mappingId}/menu/auto_discover`, {
+    method: "POST",
+    headers: { ...(authHeaders() as Record<string, string>), "Content-Type": "application/json" },
+    body: JSON.stringify({ start_url: startUrl || "" }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("ASCENDに再ログインしてください");
+    throw new Error(data.detail || data.message || data.error || "自動取得失敗");
+  }
+  return data;
+}
+
+export async function addMenuItem(mappingId: string, item: { absolute_url: string; title: string; category?: string }): Promise<{ ok: boolean; added: boolean }> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mappingId}/menu_items/add`, {
+    method: "POST",
+    headers: { ...(authHeaders() as Record<string, string>), "Content-Type": "application/json" },
+    body: JSON.stringify(item),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("ASCENDに再ログインしてください");
+    throw new Error(data.detail || data.message || data.error || "追加失敗");
+  }
+  return data;
+}
+
+export async function confirmDialogStep(
+  mapping_id: string,
+  body: { page_name: string; role: string; value: string; type: string }
+): Promise<{ ok: boolean; role: string; saved: string }> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mapping_id}/dialog/confirm`, {
+    method: "POST",
+    headers: { ...(authHeaders() as Record<string, string>), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("ASCENDに再ログインしてください");
+    throw new Error(data.detail || data.message || data.error || "保存失敗");
+  }
+  return data;
+}
+
+export async function previewDialogElement(
+  mapping_id: string,
+  body: { selector: string; navigate_url: string; operation_type: string }
+): Promise<{ ok: boolean; screenshot_b64: string; element_found: boolean; element_tag: string; element_text: string }> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mapping_id}/dialog/element_preview`, {
+    method: "POST",
+    headers: { ...(authHeaders() as Record<string, string>), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("ASCENDに再ログインしてください");
+    throw new Error(data.detail || data.message || data.error || "プレビュー失敗");
+  }
+  return data;
+}
 
 export async function multiDeepScan(
   mapping_id: string
@@ -1529,4 +2372,381 @@ export async function updateCapabilities(
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
+}
+
+export async function htmlMenuImport(mappingId: string, sourceUrl: string, rawHtml: string) {
+  const u = getStoredUser();
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mappingId}/html_menu/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(u?.token ? { Authorization: `Bearer ${u.token}` } : {}) },
+    body: JSON.stringify({ source_url: sourceUrl, raw_html: rawHtml }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+export async function getVerificationReviews(mappingId: string) {
+  const u = getStoredUser();
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mappingId}/verification_reviews`, {
+    headers: { ...(u?.token ? { Authorization: `Bearer ${u.token}` } : {}) },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function updateBusinessConditions(
+  mappingId: string,
+  conditions: {
+    site_purpose?: string;
+    screening?: {
+      height_min?: number | null;
+      height_max?: number | null;
+      weight_max?: number | null;
+      cup_min?: string;
+      tattoo_ok?: boolean;
+      age_min?: number | null;
+      age_max?: number | null;
+      custom_conditions?: string;
+      image_check?: boolean;
+    };
+    reply_policy?: {
+      tone?: string;
+      interview_info?: string;
+      shop_conditions?: string;
+    };
+    offer_template?: string;
+  }
+): Promise<{ ok: boolean; mapping_id: string; business_conditions: Record<string, unknown> }> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mappingId}/business_conditions`, {
+    method: "PATCH",
+    headers: { ...(authHeaders() as Record<string, string>), "Content-Type": "application/json" },
+    body: JSON.stringify(conditions),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "業務条件の保存に失敗しました");
+  return res.json();
+}
+
+// ─── Step 3: recruit_conversations ───────────────────────────────────────
+
+export interface RecruitConversation {
+  conversation_id: string;
+  mapping_id: string;
+  tenant_id?: string;
+  candidate_url: string;
+  reply_url?: string;       // オファー送信後の会話スレッドURL（返信送信・受信監視に使用）
+  candidate_name: string;
+  phase: "offer_sent" | "waiting_reply" | "replied" | "interview_info_sent" | "scheduled" | "declined";
+  messages: Array<{ role: "shop" | "candidate"; content: string; sent_at?: string }>;
+  profile_data?: Record<string, unknown>;
+  screening_pass?: boolean;
+  screening_reason?: string;
+  offer_sent_at?: string;
+  created_at?: string;
+  updated_at?: string;
+  last_candidate_message?: string;
+}
+
+export async function listRecruitConversations(mappingId?: string): Promise<{
+  conversations: RecruitConversation[];
+  count: number;
+}> {
+  const params = mappingId ? `?mapping_id=${encodeURIComponent(mappingId)}` : "";
+  const res = await fetch(`${API_BASE}/api/agent/recruit/conversations${params}`, {
+    headers: authHeaders() as Record<string, string>,
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "会話一覧の取得に失敗しました");
+  return res.json();
+}
+
+export async function generateRecruitReply(params: {
+  conversation_id: string;
+  new_message: string;
+  instruction?: string;
+  mapping_id?: string;
+}): Promise<{
+  generated_reply: string;
+  current_phase: string;
+  suggested_next_phase: string;
+  conversation_id: string;
+  candidate_name: string;
+  note: string;
+}> {
+  const res = await fetch(
+    `${API_BASE}/api/agent/recruit/conversations/${encodeURIComponent(params.conversation_id)}/reply/generate`,
+    {
+      method: "POST",
+      headers: { ...(authHeaders() as Record<string, string>), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        conversation_id: params.conversation_id,
+        new_message: params.new_message,
+        instruction: params.instruction || "",
+        mapping_id: params.mapping_id || "",
+      }),
+    }
+  );
+  if (!res.ok) throw new Error((await res.json()).detail || "返信生成に失敗しました");
+  return res.json();
+}
+
+export async function updateRecruitConversationPhase(
+  conversationId: string,
+  phase: string
+): Promise<{ ok: boolean; conversation_id: string; phase: string }> {
+  const res = await fetch(
+    `${API_BASE}/api/agent/recruit/conversations/${encodeURIComponent(conversationId)}/phase?phase=${encodeURIComponent(phase)}`,
+    {
+      method: "PATCH",
+      headers: authHeaders() as Record<string, string>,
+    }
+  );
+  if (!res.ok) throw new Error((await res.json()).detail || "フェーズ更新に失敗しました");
+  return res.json();
+}
+
+export async function patchOperationUrl(mappingId: string, operationType: string, targetUrl: string) {
+  const u = getStoredUser();
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mappingId}/operation_url`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...(u?.token ? { Authorization: `Bearer ${u.token}` } : {}) },
+    body: JSON.stringify({ operation_type: operationType, target_url: targetUrl }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function manualPagesPreview(mappingId: string, pages: { title: string; url: string; html: string }[]) {
+  const u = getStoredUser();
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mappingId}/manual_pages/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(u?.token ? { Authorization: `Bearer ${u.token}` } : {}) },
+    body: JSON.stringify({ pages }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function manualPagesImport(mappingId: string, pages: { title: string; url: string; html: string; op_type_override?: string }[]) {
+  const u = getStoredUser();
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mappingId}/manual_pages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(u?.token ? { Authorization: `Bearer ${u.token}` } : {}) },
+    body: JSON.stringify({ pages }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function manualPageFetchAndPreview(mappingId: string, url: string, title: string, opTypeOverride?: string) {
+  const u = getStoredUser();
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mappingId}/manual_pages/fetch_and_preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(u?.token ? { Authorization: `Bearer ${u.token}` } : {}) },
+    body: JSON.stringify({ url, title, op_type_override: opTypeOverride || "" }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function manualPageDelete(mappingId: string, pageId: string) {
+  const u = getStoredUser();
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mappingId}/manual_pages/${pageId}`, {
+    method: "DELETE",
+    headers: { ...(u?.token ? { Authorization: `Bearer ${u.token}` } : {}) },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function manualPageUpdateOpType(mappingId: string, pageId: string, opType: string) {
+  const u = getStoredUser();
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mappingId}/manual_pages/${pageId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...(u?.token ? { Authorization: `Bearer ${u.token}` } : {}) },
+    body: JSON.stringify({ op_type: opType }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function menuItemDeepScan(mappingId: string, targetUrl: string, params?: { max_follow_per_url?: number }) {
+  const u = getStoredUser();
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mappingId}/menu_item/deep_scan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(u?.token ? { Authorization: `Bearer ${u.token}` } : {}) },
+    body: JSON.stringify({ target_url: targetUrl, max_follow_per_url: params?.max_follow_per_url ?? 50 }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function menuItemsDeepScan(mappingId: string, params?: { max_urls?: number; max_follow_per_url?: number; force_rescan?: boolean; offset?: number; chunk_size?: number }) {
+  const u = getStoredUser();
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mappingId}/menu_items/deep_scan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(u?.token ? { Authorization: `Bearer ${u.token}` } : {}) },
+    body: JSON.stringify({
+      max_urls: params?.max_urls ?? 200,
+      max_follow_per_url: params?.max_follow_per_url ?? 50,
+      force_rescan: params?.force_rescan ?? true,
+      offset: params?.offset ?? 0,
+      chunk_size: params?.chunk_size ?? 2,
+    }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function createMenuItemTask(
+  mappingId: string,
+  targetUrl: string,
+  operationType: string,
+  payload: Record<string, unknown> = {},
+  scheduledAt?: string
+): Promise<{ task_id: string; status: string; preview: AgentTask["preview"]; target_url: string; operation_type: string; step_count?: number }> {
+  const u = getStoredUser();
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mappingId}/menu_item/task/create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(u?.token ? { Authorization: `Bearer ${u.token}` } : {}) },
+    body: JSON.stringify({
+      target_url: targetUrl,
+      operation_type: operationType,
+      payload,
+      scheduled_at: scheduledAt,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = typeof data.detail === "string" ? data.detail : data.detail?.message;
+    throw new Error(detail || "HTMLメニューURLのタスク作成に失敗しました");
+  }
+  return data;
+}
+
+// ── 外部LLM HTML解析 新設計 ────────────────────────────────────────────
+
+export interface AiAnalysisResult {
+  ok: boolean;
+  from_cache: boolean;
+  url_hash: string;
+  page_type: string;
+  confidence: number;
+  site_purpose: string;
+  login_selectors: Record<string, string>;
+  operation_selectors: Record<string, string>;
+  operation_steps: Array<{ step_id: string; step_type: string; selector_key: string; value: string | null; terminal: boolean }>;
+  capabilities: Record<string, boolean>;
+  analysis_notes: string;
+  apply_result?: { ok: boolean; updated_fields: string[]; error?: string };
+  error?: string;
+}
+
+/** HTMLを解析（mapping_idを指定すると即適用） */
+export async function aiAnalyzeHtml(params: {
+  rawHtml: string;
+  pageUrl?: string;
+  pageTypeHint?: string;
+  mappingId?: string;
+  forceReanalyze?: boolean;
+}): Promise<AiAnalysisResult> {
+  const res = await fetch(`${API_BASE}/api/agent/media/ai_analyze_html`, {
+    ...fetchOptions("POST", JSON.stringify({
+      raw_html:        params.rawHtml,
+      page_url:        params.pageUrl || "",
+      page_type_hint:  params.pageTypeHint || "auto",
+      mapping_id:      params.mappingId || null,
+      force_reanalyze: params.forceReanalyze ?? false,
+    })),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || data.error || "HTML解析に失敗しました");
+  return data;
+}
+
+/** mapping_id に対してHTMLを解析・適用 */
+export async function aiSetupMapping(
+  mappingId: string,
+  params: { rawHtml: string; pageUrl?: string; pageTypeHint?: string; forceReanalyze?: boolean }
+): Promise<AiAnalysisResult & { mapping_id: string; updated_fields: string[] }> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mappingId}/ai_setup`, {
+    ...fetchOptions("POST", JSON.stringify({
+      raw_html:        params.rawHtml,
+      page_url:        params.pageUrl || "",
+      page_type_hint:  params.pageTypeHint || "auto",
+      force_reanalyze: params.forceReanalyze ?? false,
+    })),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || data.error || "AI解析適用に失敗しました");
+  return data;
+}
+
+/** 複数ページを一括解析・適用 */
+export async function aiSetupBatch(
+  mappingId: string,
+  pages: Array<{ rawHtml: string; pageUrl?: string; pageTypeHint?: string }>
+): Promise<{ ok: boolean; mapping_id: string; results: Array<{ page_url: string; page_type: string; confidence: number; ok: boolean; updated_fields: string[]; from_cache: boolean; error?: string }>; ready_ops: string[]; summary: { total: number; success: number; cached: number } }> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mappingId}/ai_setup_batch`, {
+    ...fetchOptions("POST", JSON.stringify({
+      pages: pages.map(p => ({
+        raw_html:       p.rawHtml,
+        page_url:       p.pageUrl || "",
+        page_type_hint: p.pageTypeHint || "auto",
+      })),
+    })),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || data.error || "一括解析に失敗しました");
+  return data;
+}
+
+/** URLのキャッシュ解析が存在するか確認 */
+export async function checkHtmlCache(url: string): Promise<{
+  exists: boolean; url_hash: string; url: string;
+  page_type?: string; confidence?: number; site_purpose?: string;
+  capabilities?: Record<string, boolean>; ready_ops?: string[];
+}> {
+  const res = await fetch(
+    `${API_BASE}/api/agent/media/html_cache/check?url=${encodeURIComponent(url)}`,
+    fetchOptions("GET")
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "キャッシュ確認に失敗しました");
+  return data;
+}
+
+/** 共有キャッシュをmappingに即適用（他テナントが解析済みの場合） */
+export async function aiCloneFromCache(mappingId: string): Promise<{
+  ok: boolean; mapping_id?: string; ready_ops?: string[]; message?: string; reason?: string;
+}> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mappingId}/ai_clone_from_cache`, {
+    ...fetchOptions("POST", "{}"),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "キャッシュ適用に失敗しました");
+  return data;
+}
+
+/**
+ * 新設計: Playwright クロール → Gemini 解析 → AI_CONFIRMED で保存
+ * runInBg=true (デフォルト): バックグラウンド実行（即レスポンス）
+ * runInBg=false: 同期実行（完了まで待つ。デバッグ・強制再解析用）
+ */
+export async function autoSetupMapping(
+  mappingId: string,
+  options: { runInBg?: boolean } = {}
+): Promise<{
+  ok: boolean;
+  status: string;
+  message?: string;
+  ready_ops?: string[];
+  failed_ops?: string[];
+  cache_saved?: boolean;
+  pages_scanned?: number;
+  mapping_id: string;
+}> {
+  const res = await fetch(`${API_BASE}/api/agent/media/map/${mappingId}/auto_setup`, {
+    ...fetchOptions("POST", JSON.stringify({ run_in_bg: options.runInBg ?? true })),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || data.error || "自動セットアップに失敗しました");
+  return data;
 }
